@@ -1,0 +1,37 @@
+# Non-active template. Rename to scrape.yml to enable.
+name: Scrape cagematch.net
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 6 * * *"
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.17"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install patchright browser
+        run: uv run patchright install chromium --with-deps
+
+      - name: Scrape promotions
+        run: uv run cagematch scrape promotions
+        env:
+          CAGEMATCH_HEADLESS: "true"
+          # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
+          # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
+          # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cagematch-data
+          path: data/

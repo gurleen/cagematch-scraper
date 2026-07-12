@@ -1,0 +1,25 @@
+[project]
+name = "cagematch-scraper"
+version = "0.1.0"
+description = "Scraper for cagematch.net promotion/wrestler/match/title data"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "parsel>=1.11.0",
+    "patchright>=1.61.2",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "typer>=0.26.8",
+]
+
+[project.scripts]
+cagematch = "cagematch_scraper.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
