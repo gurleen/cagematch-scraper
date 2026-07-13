@@ -143,3 +143,46 @@ tests/
 - Data retention/schema deliberately minimal (JSONL of loose dicts) per user direction.
 - Headless is default `True` for CI; README notes `--headful` + `channel="chrome"` (with xvfb)
   is the most stealth-robust mode if Sucuri ever hardens.
+
+## Status: what's done vs. outstanding
+
+The full scaffold (Build steps 1–8) has been implemented and pushed. Everything below is
+what's left before the project matches the plan's original intent end-to-end.
+
+### Done
+- Project scaffold, `config.py`, `browser.py`, `items.py`, `runner.py`, `cli.py`,
+  `spiders/base.py`, `spiders/__init__.py` registry — all as designed above.
+- `promotions` spider wired end-to-end (fetch → parse → JSONL) and verified structurally
+  against a local HTTP server (BrowserManager navigation/challenge-detection loop, runner
+  concurrency + JSONL writing, CLI commands all confirmed working).
+- `wrestlers` / `matches` / `titles` stubs raise `NotImplementedError` naming a target URL.
+- Tests, `.gitignore`, `.env.example`, `README.md`, non-active CI workflow template.
+- Proxy wiring present in `config.py`/`browser.py` (inert by default, `.env`-driven).
+
+### Outstanding — blocked by sandbox networking, needs a real-network environment
+The build environment used to write this code could not get headless Chromium's TLS
+handshake through its mandatory egress proxy (`net::ERR_CONNECTION_RESET` at the TLS layer,
+on *any* HTTPS host — not cagematch-specific; `curl`/raw Python TLS worked fine through the
+same proxy). That blocked the plan's step 5 and part of "Verification":
+- **Live-confirm the promotions section id/selectors.** `spiders/promotions.py` currently
+  uses `SECTION_ID = 8` and generic `nr=`-link/table-cell parsing based on cagematch.net's
+  known conventions, but this has **not** been checked against a real page. Run
+  `uv run cagematch scrape promotions --limit 3 --headful` somewhere with normal network
+  access and adjust `SECTION_ID` / selectors in `promotions.py` if the output looks wrong.
+- **Replace the synthetic test fixture.** `tests/fixtures/promotions_list.html` is
+  hand-written to match expected markup, not a captured real page (plan step 5 called for
+  "save one real HTML page"). Once selectors are confirmed live, save a real page over it
+  and re-check `test_promotions.py` still passes.
+- **Run the "produces real records" verification** from the Verification section above —
+  not yet done against the live site.
+
+### Outstanding — straightforward follow-up work, not blocked
+- Implement `wrestlers`, `matches`, and `titles` spiders for real (currently stubs). Each
+  needs its own live selector pass, same as promotions.
+- Decide whether/when to flesh out `promotions.py`'s profile-page fetch (the plan mentions
+  "list + profile"; the current implementation only parses list pages, not individual
+  promotion profile pages, e.g. founding date, roster, etc.).
+- Firm up the `PromotionItem`/other item schemas once retention needs are clearer (currently
+  deliberately loose per "sort schema later").
+- Activate `.github/workflows/scrape.yml.example` (rename to `.yml`) once the team is ready
+  for scheduled/CI runs — currently intentionally left inactive.
