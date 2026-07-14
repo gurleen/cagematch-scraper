@@ -63,10 +63,45 @@ class WrestlerItem(TypedDict, total=False):
     career_shows: int | None  # only set for wrestlers found via All-Time Roster
 
 
+class MatchParticipant(TypedDict, total=False):
+    id: str
+    name: str
+
+
+class MatchSide(TypedDict, total=False):
+    wrestlers: list[MatchParticipant]
+    teams: list[MatchParticipant]
+    valets: list[MatchParticipant]
+    is_champion: bool
+
+
+class MatchRecord(TypedDict, total=False):
+    match_index: int
+    match_type: str
+    title_id: str | None
+    title_name: str | None
+    title_change: bool
+    duration: str | None
+    result: str  # "decisive" | "no_decision" | "unknown"
+    finish_note: str | None  # e.g. "Double Count Out", set for no_decision results
+    winners: MatchSide | None
+    losers: list[MatchSide]
+    sides: list[MatchSide]  # set instead of winners/losers when result != "decisive"
+    match_rating: float | None
+    match_votes: int | None
+    notes: list[str]
+
+
 class MatchItem(TypedDict, total=False):
     id: str
-    event: str
-    result: str
+    name: str
+    profile_url: str
+    promotion: str
+    date: str
+    location: str
+    event_rating: float | None
+    event_votes: int | None
+    matches: list[MatchRecord]
 
 
 class TitleItem(TypedDict, total=False):

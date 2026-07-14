@@ -6,11 +6,14 @@ import asyncio
 import logging
 import time
 
-from patchright.async_api import Browser, BrowserContext, Page, async_playwright
+from patchright.async_api import Browser, BrowserContext, Error as PlaywrightError, Page, async_playwright
 
 from .config import ProxyPool, Settings
 
 logger = logging.getLogger(__name__)
+
+_MAX_FETCH_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 3.0
 
 _CHALLENGE_MARKERS = (
     "You are being redirected",
@@ -50,6 +53,7 @@ class BrowserManager:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._last_request_at: float = 0.0
+        self._throttle_lock = asyncio.Lock()
 
     async def __aenter__(self) -> "BrowserManager":
         self._playwright = await async_playwright().start()
@@ -87,40 +91,70 @@ class BrowserManager:
             await self._playwright.stop()
 
     async def _throttle(self) -> None:
-        elapsed = time.monotonic() - self._last_request_at
-        remaining = self._settings.request_delay - elapsed
-        if remaining > 0:
-            await asyncio.sleep(remaining)
-        self._last_request_at = time.monotonic()
+        """Space out request *start* times by at least `request_delay`.
+
+        Guarded by a lock so concurrent `fetch()` callers (see `runner.py`, which now
+        runs fetches concurrently up to `settings.concurrency`) queue for their turn to
+        start here without racing on `_last_request_at` — but each caller's actual
+        `page.goto()`/`page.content()` work happens after this returns, outside the
+        lock, so network wait time still overlaps across concurrent fetches.
+        """
+        async with self._throttle_lock:
+            elapsed = time.monotonic() - self._last_request_at
+            remaining = self._settings.request_delay - elapsed
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+            self._last_request_at = time.monotonic()
 
     @staticmethod
     def _is_challenge_page(html: str) -> bool:
         return any(marker in html for marker in _CHALLENGE_MARKERS)
 
     async def fetch(self, url: str) -> str:
-        """Navigate to url, ride out the Sucuri JS challenge if present, return HTML."""
+        """Navigate to url, ride out the Sucuri JS challenge if present, return HTML.
+
+        Retries transient navigation errors (proxy tunnel hiccups, resets, timeouts)
+        up to `_MAX_FETCH_ATTEMPTS` times with a fixed backoff, since a long unattended
+        scrape shouldn't abort entirely over one flaky request.
+        """
         assert self._context is not None, "BrowserManager not entered"
-        await self._throttle()
 
-        page: Page = await self._context.new_page()
-        try:
-            await page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=self._settings.nav_timeout_ms,
-            )
-            html = await page.content()
-
-            attempts = 0
-            while self._is_challenge_page(html) and attempts < 5:
-                logger.info("Sucuri challenge detected for %s, waiting...", url)
-                await page.wait_for_timeout(2000)
+        last_error: PlaywrightError | None = None
+        for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
+            await self._throttle()
+            page: Page = await self._context.new_page()
+            try:
+                await page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=self._settings.nav_timeout_ms,
+                )
                 html = await page.content()
-                attempts += 1
 
-            if self._is_challenge_page(html):
-                raise RuntimeError(f"Sucuri challenge did not clear for {url}")
+                challenge_attempts = 0
+                while self._is_challenge_page(html) and challenge_attempts < 5:
+                    logger.info("Sucuri challenge detected for %s, waiting...", url)
+                    await page.wait_for_timeout(2000)
+                    html = await page.content()
+                    challenge_attempts += 1
 
-            return html
-        finally:
-            await page.close()
+                if self._is_challenge_page(html):
+                    raise RuntimeError(f"Sucuri challenge did not clear for {url}")
+
+                return html
+            except PlaywrightError as error:
+                last_error = error
+                logger.warning(
+                    "Fetch attempt %d/%d failed for %s: %s",
+                    attempt,
+                    _MAX_FETCH_ATTEMPTS,
+                    url,
+                    error,
+                )
+                if attempt < _MAX_FETCH_ATTEMPTS:
+                    await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+            finally:
+                await page.close()
+
+        assert last_error is not None
+        raise last_error

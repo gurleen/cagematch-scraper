@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     base_url: str = "https://www.cagematch.net"
     headless: bool = True
     channel: str | None = "chromium"
+    #: Max concurrent in-flight page fetches. Each still waits its turn behind
+    #: `request_delay` (see `BrowserManager._throttle`), but with concurrency > 1
+    #: multiple fetches can be in network-wait at once instead of one at a time.
+    #: Kept modest by default — some proxies cap concurrent tunnel connections
+    #: (concurrency=4 hit `ERR_TUNNEL_CONNECTION_FAILED` against the configured proxy
+    #: in testing; concurrency=2 was stable). Raise it if your proxy can take it.
     concurrency: int = 2
     request_delay: float = 1.5
     nav_timeout_ms: int = 30000
@@ -31,11 +37,14 @@ class Settings(BaseSettings):
     user_data_dir: Path | None = None
     block_resources: bool = True
 
-    #: Comma-separated cagematch promotion ids to restrict promotion/wrestler scraping
-    #: to. Default: WWE (1), AEW (2287). Empty string disables filtering (promotions
-    #: spider only — the wrestlers spider always needs at least one promotion, since it
-    #: discovers wrestlers via promotion rosters).
+    #: Comma-separated cagematch promotion ids to restrict promotion/wrestler/match
+    #: scraping to. Default: WWE (1), AEW (2287). Empty string disables filtering
+    #: (promotions spider only — wrestlers/matches always need at least one promotion,
+    #: since both discover their data by walking a promotion's pages).
     promotion_ids: str = "1,2287"
+
+    #: Earliest year (inclusive) the matches spider fetches events for.
+    matches_since_year: int = 2020
 
     def promotion_id_list(self) -> list[str] | None:
         ids = [x.strip() for x in self.promotion_ids.split(",") if x.strip()]
