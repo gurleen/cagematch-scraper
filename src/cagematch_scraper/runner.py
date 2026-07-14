@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 
 from parsel import Selector
 
@@ -22,26 +23,69 @@ from .spiders.base import BaseSpider
 logger = logging.getLogger(__name__)
 
 
-async def run(spider: BaseSpider, settings: Settings, limit: int | None = None) -> int:
+def _load_existing_ids(output_path: Path) -> set[str]:
+    """Read `output_path`'s existing JSONL and return the ids already present.
+
+    Any line that fails to parse (e.g. the process was killed mid-write, truncating
+    the last line) is dropped and the file rewritten without it, so a resumed run
+    doesn't leave a corrupt line behind.
+    """
+    if not output_path.exists():
+        return set()
+
+    raw_lines = [line for line in output_path.read_text(encoding="utf-8").splitlines() if line]
+    valid_lines: list[str] = []
+    ids: set[str] = set()
+    for line in raw_lines:
+        try:
+            item_id = json.loads(line)["id"]
+        except (json.JSONDecodeError, KeyError):
+            continue
+        valid_lines.append(line)
+        ids.add(item_id)
+
+    if len(valid_lines) != len(raw_lines):
+        dropped = len(raw_lines) - len(valid_lines)
+        output_path.write_text(
+            "\n".join(valid_lines) + ("\n" if valid_lines else ""), encoding="utf-8"
+        )
+        logger.warning("Dropped %d corrupt line(s) from %s while resuming", dropped, output_path)
+
+    return ids
+
+
+async def run(
+    spider: BaseSpider, settings: Settings, limit: int | None = None, resume: bool = False
+) -> int:
     """Fetch every start URL for `spider` (and its pagination), parse it, and append
     results to JSONL.
 
-    Returns the number of items written. With `limit` set and concurrency > 1, the
-    final count may slightly exceed `limit`: work already in flight when the limit is
-    reached isn't cancelled, only further work is skipped.
+    With `resume=True`, items already present in the output file (matched by `id`) are
+    neither re-fetched nor re-written — useful for picking a long run back up after an
+    interruption. Without it, the output file is overwritten from scratch as before.
+
+    Returns the number of items written (including, when resuming, those already
+    present). With `limit` set and concurrency > 1, the final count may slightly exceed
+    `limit`: work already in flight when the limit is reached isn't cancelled, only
+    further work is skipped.
     """
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     output_path = settings.output_dir / f"{spider.name}.jsonl"
 
+    already_done: set[str] = _load_existing_ids(output_path) if resume else set()
+    if already_done:
+        logger.info("Resuming %s: %d items already present", output_path, len(already_done))
+
     semaphore = asyncio.Semaphore(settings.concurrency)
     write_lock = asyncio.Lock()
-    written = 0
+    written = len(already_done)
 
     def limit_reached() -> bool:
         return limit is not None and written >= limit
 
     async with BrowserManager(settings) as browser:
-        f = output_path.open("w", encoding="utf-8")
+        file_mode = "a" if resume and already_done else "w"
+        f = output_path.open(file_mode, encoding="utf-8")
         try:
 
             async def write_item(item: dict) -> None:
@@ -54,6 +98,9 @@ async def run(spider: BaseSpider, settings: Settings, limit: int | None = None) 
 
             async def process_item(item: dict) -> None:
                 if limit_reached():
+                    return
+                item_id = item.get("id")
+                if item_id is not None and item_id in already_done:
                     return
                 profile_url = item.get("profile_url")
                 if spider.fetch_profile and profile_url:

@@ -29,6 +29,12 @@ def scrape(
     no_profiles: bool = typer.Option(
         False, "--no-profiles", help="Skip per-item profile-page fetches (saves bandwidth)"
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Skip items already present in data/<spider>.jsonl (from an interrupted run) "
+        "instead of overwriting the file",
+    ),
 ) -> None:
     """Run a spider and write its output to data/<spider>.jsonl."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -46,7 +52,7 @@ def scrape(
     if no_profiles:
         spider.fetch_profile = False
 
-    written = asyncio.run(run(spider, settings, limit=limit))
+    written = asyncio.run(run(spider, settings, limit=limit, resume=resume))
     typer.echo(f"Wrote {written} items to {settings.output_dir / f'{spider_name}.jsonl'}")
 
 
