@@ -60,6 +60,7 @@ class WrestlerItem(TypedDict, total=False):
     current_brand: str | None
     roster_rating: float | None
     roster_votes: int | None
+    career_shows: int | None  # only set for wrestlers found via All-Time Roster
 
 
 class MatchItem(TypedDict, total=False):

@@ -10,12 +10,14 @@ def test_requires_promotion_ids() -> None:
         WrestlersSpider(Settings(promotion_ids=""))
 
 
-def test_start_requests_one_per_promotion() -> None:
+def test_start_requests_roster_and_all_time_per_promotion() -> None:
     spider = WrestlersSpider(Settings(promotion_ids="1,2287"))
     urls = list(spider.start_requests())
     assert urls == [
         "https://www.cagematch.net/?id=8&nr=1&page=15",
         "https://www.cagematch.net/?id=8&nr=2287&page=15",
+        "https://www.cagematch.net/?id=8&nr=1&page=16",
+        "https://www.cagematch.net/?id=8&nr=2287&page=16",
     ]
 
 
@@ -72,6 +74,47 @@ def test_wrestler_seen_across_promotions_only_yielded_once(
     )
     all_ids = [item["id"] for item in wwe_items + aew_items]
     assert len(all_ids) == len(set(all_ids))
+
+
+def test_parse_all_time_roster_has_show_count_not_roles(wwe_all_time_roster_html: str) -> None:
+    spider = WrestlersSpider(Settings(promotion_ids="1"))
+    selector = Selector(text=wwe_all_time_roster_html)
+
+    items = list(spider.parse(selector, "https://www.cagematch.net/?id=8&nr=1&page=16"))
+
+    # Tag-team/stable entries (id=28/id=29 links) aren't individual wrestlers and are
+    # excluded since only id=2 links are followed.
+    assert all(item["name"] not in ("Bloodline", "Alpha Academy", "Bella Twins") for item in items)
+
+    uncle_howdy = next(item for item in items if item["id"] == "7311")
+    assert uncle_howdy["name"] == "Uncle Howdy"
+    assert uncle_howdy["career_shows"] == 17
+    assert "active_roles" not in uncle_howdy
+    assert "roster_rating" not in uncle_howdy
+
+
+def test_all_time_roster_only_adds_wrestlers_missing_from_roster(
+    wwe_roster_html: str, wwe_all_time_roster_html: str
+) -> None:
+    spider = WrestlersSpider(Settings(promotion_ids="1"))
+    roster_items = list(
+        spider.parse(Selector(text=wwe_roster_html), "https://www.cagematch.net/?id=8&nr=1&page=15")
+    )
+    all_time_items = list(
+        spider.parse(
+            Selector(text=wwe_all_time_roster_html),
+            "https://www.cagematch.net/?id=8&nr=1&page=16",
+        )
+    )
+
+    roster_ids = {item["id"] for item in roster_items}
+    all_time_ids = {item["id"] for item in all_time_items}
+
+    # The spider's own _seen dedup means all_time_items never re-includes a roster id.
+    assert roster_ids.isdisjoint(all_time_ids)
+    assert len(all_time_items) > 0
+    # Roster-only fields carry roles/rating; All-Time-only entries carry career_shows.
+    assert all("career_shows" in item for item in all_time_items)
 
 
 def test_parse_profile_multi_range_roles(wrestler_profile_rusev_html: str) -> None:

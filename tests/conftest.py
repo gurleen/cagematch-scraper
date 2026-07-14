@@ -26,6 +26,11 @@ def aew_roster_html() -> str:
 
 
 @pytest.fixture
+def wwe_all_time_roster_html() -> str:
+    return (FIXTURES_DIR / "wwe_alltime_roster.html").read_text(encoding="utf-8")
+
+
+@pytest.fixture
 def wrestler_profile_rusev_html() -> str:
     return (FIXTURES_DIR / "wrestler_profile_rusev.html").read_text(encoding="utf-8")
 

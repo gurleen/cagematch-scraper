@@ -1,11 +1,24 @@
 """Wrestlers spider — cagematch.net's wrestler database (id=2).
 
 Confirmed live against cagematch.net: there's no bare "browse all wrestlers" list, so
-this spider discovers wrestlers via each configured promotion's roster page
-(`?id=8&nr=<promotion_id>&page=15`), a single un-paginated table with columns
-`[#, gimmick, roles, (brand,) rating, votes]` — the brand column only exists for
-promotions that split into brands (WWE does, AEW doesn't), so rating/votes are always
-read from the last two cells rather than a fixed index.
+this spider discovers wrestlers via two tabs on each configured promotion's page:
+
+- Roster (`?id=8&nr=<promotion_id>&page=15`): cagematch's curated affiliation list.
+  Broader than "currently active" (it includes retired legends like Ted DiBiase), but
+  not a full history either. Table columns: `[#, gimmick, roles, (brand,) rating,
+  votes]` — the brand column only exists for promotions that split into brands (WWE
+  does, AEW doesn't), so rating/votes are always read from the last two cells rather
+  than a fixed index.
+- All-Time Roster (`?id=8&nr=<promotion_id>&page=16`): a separate, appearance-count-based
+  list. Largely non-overlapping with Roster — confirmed live for WWE, it's missing some
+  top legends that Roster has, but includes ~113 wrestlers Roster doesn't (recent
+  departures, lower-card names). Table columns: `[#, gimmick, # shows]`. Also lists
+  tag-team/stable entries, but those link to `id=28`/`id=29` (teams/stables), not
+  `id=2` (wrestlers), so they're naturally excluded by the `id=2&nr=` link match.
+
+Fetching both and deduping by wrestler id (Roster processed first, so its richer
+fields win for wrestlers present in both) gets closer to "everyone who was ever on the
+promotion's roster" than either tab alone.
 
 Each wrestler's own profile page (`?id=2&nr=<wrestler_id>`) is then fetched (via
 `fetch_profile`/`parse_profile`) to pull as much career and personal data as cagematch
@@ -32,6 +45,7 @@ from .base import BaseSpider
 from .promotions import _parse_rating, _parse_votes
 
 ROSTER_URL = "https://www.cagematch.net/?id=8&nr={promotion_id}&page=15"
+ALL_TIME_ROSTER_URL = "https://www.cagematch.net/?id=8&nr={promotion_id}&page=16"
 PROFILE_URL = "https://www.cagematch.net/?id=2&nr={wrestler_id}"
 ROSTER_LINK_RE = re.compile(r"[?&]id=2&nr=(\d+)")
 ROLE_ENTRY_RE = re.compile(r"^(?P<role>.*?)(?:\s*\((?P<ranges>.+)\))?$")
@@ -140,12 +154,18 @@ class WrestlersSpider(BaseSpider):
         self._seen: set[str] = set()
 
     def start_requests(self) -> Iterable[str]:
+        # Roster before All-Time Roster, per promotion: a wrestler present in both is
+        # deduped to its first sighting, and Roster's fields (roles/brand/rating) are
+        # richer than All-Time Roster's (just a show count).
         for promotion_id in self.promotion_ids:
             yield ROSTER_URL.format(promotion_id=promotion_id)
+        for promotion_id in self.promotion_ids:
+            yield ALL_TIME_ROSTER_URL.format(promotion_id=promotion_id)
 
     def parse(self, selector: Selector, url: str) -> Iterable[WrestlerItem]:
         promo_match = re.search(r"[?&]nr=(\d+)", url)
         promotion_id = promo_match.group(1) if promo_match else None
+        is_all_time = "page=16" in url
 
         tables = selector.css("table.TBase")
         rows = tables[0].css("tr")[1:] if tables else []
@@ -174,13 +194,18 @@ class WrestlersSpider(BaseSpider):
                 "profile_url": PROFILE_URL.format(wrestler_id=wrestler_id),
                 "promotions": [promotion_id] if promotion_id else [],
             }
-            if len(cells) > 2:
-                item["active_roles"] = _comma_list(cells[2])
-            if len(cells) == 6:
-                item["current_brand"] = cells[3]
-            if len(cells) >= 4:
-                item["roster_rating"] = _parse_rating(cells[-2])
-                item["roster_votes"] = _parse_votes(cells[-1])
+            if is_all_time:
+                # Columns: [#, gimmick, # shows] — no roles/brand/rating here.
+                if len(cells) > 2:
+                    item["career_shows"] = _parse_votes(cells[2])
+            else:
+                if len(cells) > 2:
+                    item["active_roles"] = _comma_list(cells[2])
+                if len(cells) == 6:
+                    item["current_brand"] = cells[3]
+                if len(cells) >= 4:
+                    item["roster_rating"] = _parse_rating(cells[-2])
+                    item["roster_votes"] = _parse_votes(cells[-1])
             yield item
 
     def parse_profile(self, selector: Selector, item: dict) -> dict:
