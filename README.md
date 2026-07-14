@@ -15,8 +15,9 @@ uv run patchright install chromium
 ```bash
 uv run cagematch list-spiders
 uv run cagematch scrape promotions --limit 20
-uv run cagematch scrape promotions --headful       # visible browser, for debugging
-uv run cagematch scrape promotions --no-profiles   # skip per-item profile fetch (see below)
+uv run cagematch scrape wrestlers --limit 20
+uv run cagematch scrape wrestlers --headful       # visible browser, for debugging
+uv run cagematch scrape wrestlers --no-profiles   # skip per-item profile fetch (see below)
 ```
 
 Output is written as JSONL to `data/<spider>.jsonl` (one JSON object per line). Schema is
@@ -36,6 +37,10 @@ file (see `.env.example`). Notably:
 - `CAGEMATCH_PROXY_LIST_FILE` — path to a file of `USERNAME:PASSWORD@HOST:PORT` lines (one
   per proxy), default `proxy-creds.txt`. Ignored if `CAGEMATCH_PROXY_SERVER` is set. Each
   `cagematch scrape` invocation advances to the next distinct proxy in the list.
+- `CAGEMATCH_PROMOTION_IDS` — comma-separated cagematch promotion ids to restrict
+  scraping to. Default `1,2287` (WWE, AEW). The `wrestlers` spider uses this list to find
+  wrestlers (via each promotion's roster), so it always needs at least one id here. Set to
+  an empty string to scrape every promotion (only affects the `promotions` spider).
 
 ## Spiders
 
@@ -47,8 +52,15 @@ file (see `.env.example`). Notably:
   promotion has used, with `from_date`/`to_date` (`to_date` is `null` for the current
   name). This is one extra request per item — pass `--no-profiles` to skip it and just get
   the list-page fields.
-- `wrestlers`, `matches`, `titles` — stubs; each raises `NotImplementedError` naming its
-  planned target URL.
+- `wrestlers` — finds wrestlers via the roster of each promotion in
+  `CAGEMATCH_PROMOTION_IDS`, then fetches each wrestler's profile page for career and
+  personal data: birthday, birthplace, gender, height/weight, background, alter egos,
+  nicknames, signature moves, wrestling style, trainers, in-ring career span/experience,
+  and a full role history (each role's date range(s), since a wrestler can hold the same
+  role in separate stints). Pass `--no-profiles` to only get the roster-level fields
+  (name, roles, brand, rating).
+- `matches`, `titles` — stubs; each raises `NotImplementedError` naming its planned
+  target URL.
 
 ## Tests
 

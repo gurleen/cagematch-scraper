@@ -1,5 +1,6 @@
 from parsel import Selector
 
+from cagematch_scraper.config import Settings
 from cagematch_scraper.spiders.promotions import (
     PromotionsSpider,
     _parse_active_years,
@@ -9,7 +10,7 @@ from cagematch_scraper.spiders.promotions import (
 
 
 def test_parse_promotions_list(promotions_list_html: str) -> None:
-    spider = PromotionsSpider()
+    spider = PromotionsSpider(Settings(promotion_ids=""))
     selector = Selector(text=promotions_list_html)
 
     items = list(spider.parse(selector, "https://www.cagematch.net/?id=8&view=promotions"))
@@ -40,6 +41,15 @@ def test_parse_promotions_list(promotions_list_html: str) -> None:
     assert ecw["active_year_end"] == 2001
 
 
+def test_parse_promotions_list_filtered_by_default_settings(promotions_list_html: str) -> None:
+    spider = PromotionsSpider(Settings())  # default promotion_ids = WWE, AEW
+    selector = Selector(text=promotions_list_html)
+
+    items = list(spider.parse(selector, "https://www.cagematch.net/?id=8&view=promotions"))
+
+    assert {item["id"] for item in items} == {"1", "2287"}
+
+
 def test_parse_active_years() -> None:
     assert _parse_active_years("1948-") == (1948, None)
     assert _parse_active_years("2002-2023") == (2002, 2023)
@@ -55,7 +65,7 @@ def test_parse_rating_and_votes() -> None:
 
 
 def test_parse_profile_name_history(promotion_profile_html: str) -> None:
-    spider = PromotionsSpider()
+    spider = PromotionsSpider(Settings(promotion_ids=""))
     selector = Selector(text=promotion_profile_html)
 
     item = spider.parse_profile(selector, {"id": "1", "name": "World Wrestling Entertainment"})

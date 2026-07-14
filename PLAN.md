@@ -186,13 +186,36 @@ work the first pass couldn't:
   selection happens once per browser context (per run), not per-request, so the Sucuri
   challenge cookie stays valid for the whole run.
 
+### Done — promotion filter + wrestlers spider
+- **Added `CAGEMATCH_PROMOTION_IDS`** (`Settings.promotion_ids` / `promotion_id_list()`),
+  comma-separated cagematch promotion ids, default `1,2287` (WWE, AEW). `PromotionsSpider`
+  filters its output by it; spiders are now constructed as `spider_cls(settings)`
+  uniformly (`cli.py`, all spider `__init__`s).
+- **Implemented `wrestlers` spider for real** (was a stub). There's no bare "browse all
+  wrestlers" list on cagematch, so it discovers wrestlers via each configured promotion's
+  roster page (`?id=8&nr=<id>&page=15` — a single un-paginated table; the brand column
+  only exists for promotions that split into brands, so rating/votes are read from the
+  last two cells rather than a fixed index) and dedupes wrestlers already seen across
+  promotions. Each wrestler's profile page (`?id=2&nr=<id>`) is then fetched via
+  `fetch_profile`/`parse_profile` for career/personal data — birthday, birthplace,
+  gender, height/weight, background, alter egos, nicknames, signature moves, wrestling
+  style, trainers, career span/experience, and a full role history (`roles`, supporting
+  a role with multiple non-contiguous date ranges, e.g. Lilian Garcia's three separate
+  "Ring Announcer" stints).
+- Found and fixed a parsel gotcha along the way: `Selector(text=fragment, type="html")`
+  still auto-detects JSON when a `<br>`-split text fragment happens to parse as valid
+  JSON (e.g. a quoted nickname like `"God's Favourite Champion"`), overriding the
+  explicit `type`. Both `promotions.py`'s `_parse_name_history` and `wrestlers.py`'s
+  `_br_list` now strip tags with regex + `html.unescape` instead of nesting a `Selector`.
+- New fixtures (`tests/fixtures/wwe_roster.html`, `aew_roster.html`,
+  `wrestler_profile_rusev.html`, `wrestler_profile_multirange.html`) and
+  `tests/test_wrestlers.py`; live-verified with `uv run cagematch scrape wrestlers
+  --limit 3` through the configured proxy.
+
 ### Outstanding — straightforward follow-up work, not blocked
-- Implement `wrestlers`, `matches`, and `titles` spiders for real (currently stubs). Each
-  needs its own live selector pass, same as promotions.
-- Decide whether/when to flesh out `promotions.py`'s profile-page fetch (the plan mentions
-  "list + profile"; the current implementation only parses list pages, not individual
-  promotion profile pages, e.g. founding date, roster, etc.).
-- Firm up the `PromotionItem`/other item schemas once retention needs are clearer (currently
-  deliberately loose per "sort schema later").
+- Implement `matches` and `titles` spiders for real (currently stubs). Each needs its own
+  live selector pass, same as promotions/wrestlers.
+- Firm up the `PromotionItem`/`WrestlerItem`/other item schemas once retention needs are
+  clearer (currently deliberately loose per "sort schema later").
 - Activate `.github/workflows/scrape.yml.example` (rename to `.yml`) once the team is ready
   for scheduled/CI runs — currently intentionally left inactive.

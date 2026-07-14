@@ -11,15 +11,20 @@ info box listing every name the promotion has used, one per line as
 Federation (30.03.1979 - 04.05.2002)". `parse_profile` extracts that into
 `name_history`; it's only fetched when `fetch_profile` is enabled, since it costs
 one extra request per promotion.
+
+Restricted by `Settings.promotion_ids` (default: WWE + AEW) — set
+`CAGEMATCH_PROMOTION_IDS=""` to scrape every promotion instead.
 """
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Iterable
 
 from parsel import Selector
 
+from ..config import Settings
 from ..items import PromotionItem, PromotionNameHistoryEntry
 from .base import BaseSpider
 
@@ -71,7 +76,10 @@ def _parse_name_history(selector: Selector) -> list[PromotionNameHistoryEntry]:
 
         entries: list[PromotionNameHistoryEntry] = []
         for fragment in re.split(r"<br\s*/?>", inner_html):
-            text = " ".join(Selector(text=fragment).css("::text").getall()).strip()
+            # Regex tag-stripping, not a nested Selector: parsel's type auto-detection
+            # would classify a fragment that happens to parse as valid JSON as JSON
+            # rather than HTML/text, even with an explicit type="html".
+            text = html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
             if not text:
                 continue
             match = NAME_HISTORY_ENTRY_RE.match(text)
@@ -93,8 +101,9 @@ class PromotionsSpider(BaseSpider):
     name = "promotions"
     fetch_profile = True
 
-    def __init__(self, max_pages: int = 1):
+    def __init__(self, settings: Settings, max_pages: int = 1):
         self.max_pages = max_pages
+        self.promotion_ids = settings.promotion_id_list()
 
     def start_requests(self) -> Iterable[str]:
         for page in range(self.max_pages):
@@ -109,6 +118,8 @@ class PromotionsSpider(BaseSpider):
                 continue
             promotion_id = match.group(1)
             if promotion_id in seen:
+                continue
+            if self.promotion_ids is not None and promotion_id not in self.promotion_ids:
                 continue
 
             name = "".join(link.css("::text").getall()).strip()
