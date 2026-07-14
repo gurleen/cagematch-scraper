@@ -159,22 +159,32 @@ what's left before the project matches the plan's original intent end-to-end.
 - Tests, `.gitignore`, `.env.example`, `README.md`, non-active CI workflow template.
 - Proxy wiring present in `config.py`/`browser.py` (inert by default, `.env`-driven).
 
-### Outstanding — blocked by sandbox networking, needs a real-network environment
-The build environment used to write this code could not get headless Chromium's TLS
-handshake through its mandatory egress proxy (`net::ERR_CONNECTION_RESET` at the TLS layer,
-on *any* HTTPS host — not cagematch-specific; `curl`/raw Python TLS worked fine through the
-same proxy). That blocked the plan's step 5 and part of "Verification":
-- **Live-confirm the promotions section id/selectors.** `spiders/promotions.py` currently
-  uses `SECTION_ID = 8` and generic `nr=`-link/table-cell parsing based on cagematch.net's
-  known conventions, but this has **not** been checked against a real page. Run
-  `uv run cagematch scrape promotions --limit 3 --headful` somewhere with normal network
-  access and adjust `SECTION_ID` / selectors in `promotions.py` if the output looks wrong.
-- **Replace the synthetic test fixture.** `tests/fixtures/promotions_list.html` is
-  hand-written to match expected markup, not a captured real page (plan step 5 called for
-  "save one real HTML page"). Once selectors are confirmed live, save a real page over it
-  and re-check `test_promotions.py` still passes.
-- **Run the "produces real records" verification** from the Verification section above —
-  not yet done against the live site.
+### Done (previously blocked, now resolved in a real-network environment)
+A later session had normal network access (no egress-proxy TLS issue) and completed the
+work the first pass couldn't:
+- **Live-confirmed the promotions URL/selectors.** The plain `?id=8&page=4` URL used
+  originally was actually cagematch's rating-sorted "Overview" (~50 rows, no real
+  pagination). The correct browsable list is `?id=8&view=promotions`, paginated via
+  `s=<row offset>` in steps of 100 (not a 1-based page number). Row cells are
+  `[rank, logo, name, location, active_years, rating, votes]` — `promotions.py` and
+  `items.py` (`PromotionItem`) were updated to match; the old guessed `location`/`status`
+  fields were wrong (off-by-one into the logo/name cells) and are now
+  `location`/`active_years`/`rating`/`votes`.
+- **Replaced the synthetic test fixture** with a real captured page
+  (`tests/fixtures/promotions_list.html`, 100 rows); `test_promotions.py` asserts against
+  real values (WWE/AEW/NJPW rows) and passes offline.
+- **Ran the live verification**: `uv run cagematch scrape promotions --limit 5` produced
+  real records through the configured proxy; `uv run pytest` is green.
+- **Added bandwidth-saving resource blocking**: `BrowserManager` now aborts
+  image/media/font/stylesheet requests by default (`CAGEMATCH_BLOCK_RESOURCES=true`),
+  cutting a promotions-list page fetch to ~85KB — important given the proxy's limited
+  (~4GB) bandwidth cap.
+- **Added proxy-list cycling**: `CAGEMATCH_PROXY_LIST_FILE` (default `proxy-creds.txt`,
+  gitignored) holds `USERNAME:PASSWORD@HOST:PORT` lines; `Settings.load_proxy_pool()` +
+  `ProxyPool` dedupe and cycle them, with the cursor persisted to
+  `<output_dir>/.proxy_cursor` so successive CLI runs advance through the pool. Proxy
+  selection happens once per browser context (per run), not per-request, so the Sucuri
+  challenge cookie stays valid for the whole run.
 
 ### Outstanding — straightforward follow-up work, not blocked
 - Implement `wrestlers`, `matches`, and `titles` spiders for real (currently stubs). Each

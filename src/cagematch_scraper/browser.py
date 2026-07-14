@@ -8,7 +8,7 @@ import time
 
 from patchright.async_api import Browser, BrowserContext, Page, async_playwright
 
-from .config import Settings
+from .config import ProxyPool, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,28 @@ _CHALLENGE_MARKERS = (
     "Sucuri WebSite Firewall",
     "sucuri_cloudproxy_js",
 )
+
+_BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
+
+
+def _route_filter(route) -> object:
+    if route.request.resource_type in _BLOCKED_RESOURCE_TYPES:
+        return route.abort()
+    return route.continue_()
+
+
+def _next_proxy(settings: Settings, pool: list[dict[str, str]]) -> dict[str, str] | None:
+    """Pick the next proxy from `pool`, persisting a cursor so successive CLI runs rotate."""
+    if not pool:
+        return None
+    cursor_path = settings.output_dir / ".proxy_cursor"
+    try:
+        index = int(cursor_path.read_text(encoding="utf-8").strip()) % len(pool)
+    except (OSError, ValueError):
+        index = 0
+    settings.output_dir.mkdir(parents=True, exist_ok=True)
+    cursor_path.write_text(str((index + 1) % len(pool)), encoding="utf-8")
+    return pool[index]
 
 
 class BrowserManager:
@@ -31,10 +53,16 @@ class BrowserManager:
 
     async def __aenter__(self) -> "BrowserManager":
         self._playwright = await async_playwright().start()
+        proxy = self._settings.proxy_dict()
+        if proxy is None:
+            pool = list(ProxyPool(self._settings.load_proxy_pool()))
+            proxy = _next_proxy(self._settings, pool)
+            if proxy is not None:
+                logger.info("Using proxy %s (%d in pool)", proxy["server"], len(pool))
         launch_kwargs = dict(
             headless=self._settings.headless,
             channel=self._settings.channel,
-            proxy=self._settings.proxy_dict(),
+            proxy=proxy,
         )
         if self._settings.user_data_dir is not None:
             self._settings.user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -45,6 +73,9 @@ class BrowserManager:
         else:
             self._browser = await self._playwright.chromium.launch(**launch_kwargs)
             self._context = await self._browser.new_context()
+
+        if self._settings.block_resources:
+            await self._context.route("**/*", _route_filter)
         return self
 
     async def __aexit__(self, *exc_info) -> None:

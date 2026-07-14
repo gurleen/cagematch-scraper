@@ -35,6 +35,16 @@ async def run(spider: BaseSpider, settings: Settings, limit: int | None = None) 
             selector = Selector(text=html)
             return list(spider.parse(selector, url))
 
+        async def enrich_with_profile(item: dict) -> dict:
+            profile_url = item.get("profile_url")
+            if not spider.fetch_profile or not profile_url:
+                return item
+            async with semaphore:
+                logger.info("Fetching profile %s", profile_url)
+                html = await browser.fetch(profile_url)
+            selector = Selector(text=html)
+            return spider.parse_profile(selector, item)
+
         with output_path.open("w", encoding="utf-8") as f:
             for url in spider.start_requests():
                 if limit is not None and written >= limit:
@@ -43,6 +53,7 @@ async def run(spider: BaseSpider, settings: Settings, limit: int | None = None) 
                 for item in items:
                     if limit is not None and written >= limit:
                         break
+                    item = await enrich_with_profile(item)
                     f.write(json.dumps(item, ensure_ascii=False) + "\n")
                     written += 1
 

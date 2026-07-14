@@ -26,6 +26,9 @@ def scrape(
     spider_name: str = typer.Argument(..., help="Spider name, e.g. 'promotions'"),
     limit: int | None = typer.Option(None, "--limit", help="Max items to write"),
     headful: bool = typer.Option(False, "--headful", help="Run with a visible browser"),
+    no_profiles: bool = typer.Option(
+        False, "--no-profiles", help="Skip per-item profile-page fetches (saves bandwidth)"
+    ),
 ) -> None:
     """Run a spider and write its output to data/<spider>.jsonl."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -39,7 +42,11 @@ def scrape(
     if headful:
         settings.headless = False
 
-    written = asyncio.run(run(spider_cls(), settings, limit=limit))
+    spider = spider_cls()
+    if no_profiles:
+        spider.fetch_profile = False
+
+    written = asyncio.run(run(spider, settings, limit=limit))
     typer.echo(f"Wrote {written} items to {settings.output_dir / f'{spider_name}.jsonl'}")
 
 
