@@ -9,6 +9,8 @@ from parsel import Selector
 
 
 class BaseSpider(ABC):
+    """Spiders are constructed as `spider_cls(settings)` (see `cli.py`)."""
+
     name: str
 
     #: If True, the runner fetches each yielded item's `profile_url` (when present)

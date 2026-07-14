@@ -42,7 +42,7 @@ def scrape(
     if headful:
         settings.headless = False
 
-    spider = spider_cls()
+    spider = spider_cls(settings)
     if no_profiles:
         spider.fetch_profile = False
 

@@ -11,11 +11,15 @@ from collections.abc import Iterable
 
 from parsel import Selector
 
+from ..config import Settings
 from .base import BaseSpider
 
 
 class TitlesSpider(BaseSpider):
     name = "titles"
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
 
     def start_requests(self) -> Iterable[str]:
         raise NotImplementedError(

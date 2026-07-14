@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     user_data_dir: Path | None = None
     block_resources: bool = True
 
+    #: Comma-separated cagematch promotion ids to restrict promotion/wrestler scraping
+    #: to. Default: WWE (1), AEW (2287). Empty string disables filtering (promotions
+    #: spider only — the wrestlers spider always needs at least one promotion, since it
+    #: discovers wrestlers via promotion rosters).
+    promotion_ids: str = "1,2287"
+
+    def promotion_id_list(self) -> list[str] | None:
+        ids = [x.strip() for x in self.promotion_ids.split(",") if x.strip()]
+        return ids or None
+
     proxy_server: str | None = None
     proxy_username: str | None = None
     proxy_password: str | None = None
