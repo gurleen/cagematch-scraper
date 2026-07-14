@@ -52,13 +52,15 @@ file (see `.env.example`). Notably:
   promotion has used, with `from_date`/`to_date` (`to_date` is `null` for the current
   name). This is one extra request per item — pass `--no-profiles` to skip it and just get
   the list-page fields.
-- `wrestlers` — finds wrestlers via the roster of each promotion in
-  `CAGEMATCH_PROMOTION_IDS`, then fetches each wrestler's profile page for career and
-  personal data: birthday, birthplace, gender, height/weight, background, alter egos,
-  nicknames, signature moves, wrestling style, trainers, in-ring career span/experience,
-  and a full role history (each role's date range(s), since a wrestler can hold the same
-  role in separate stints). Pass `--no-profiles` to only get the roster-level fields
-  (name, roles, brand, rating).
+- `wrestlers` — finds wrestlers via both the current roster and the all-time roster of
+  each promotion in `CAGEMATCH_PROMOTION_IDS` (the two lists only partially overlap, so
+  using both catches former/departed roster members that the current roster alone
+  misses), then fetches each wrestler's profile page for career and personal data:
+  birthday, birthplace, gender, height/weight, background, alter egos, nicknames,
+  signature moves, wrestling style, trainers, in-ring career span/experience, and a full
+  role history (each role's date range(s), since a wrestler can hold the same role in
+  separate stints). Pass `--no-profiles` to only get the roster-level fields (name,
+  roles, brand, rating, or — for all-time-roster-only entries — a show count).
 - `matches`, `titles` — stubs; each raises `NotImplementedError` naming its planned
   target URL.
 

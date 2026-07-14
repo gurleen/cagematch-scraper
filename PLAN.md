@@ -212,6 +212,25 @@ work the first pass couldn't:
   `tests/test_wrestlers.py`; live-verified with `uv run cagematch scrape wrestlers
   --limit 3` through the configured proxy.
 
+### Done — wrestlers spider now also covers the All-Time Roster
+The initial `wrestlers` spider only fetched a promotion's "Roster" tab (`page=15`).
+Checking live against WWE, that tab is broader than "currently active" (it already
+includes retired legends like Ted DiBiase, John Cena, The Rock) but isn't a full
+history: cagematch's separate "All-Time Roster" tab (`page=16`, appearance-count-based
+rather than affiliation-based) turned out to be largely non-overlapping — missing some
+top legends Roster has, but covering ~58 individual wrestlers (departed/lower-card
+names) that Roster doesn't.
+- `start_requests` now yields both tabs per configured promotion (Roster first, so its
+  richer fields win on dedup for wrestlers present in both).
+- `parse` branches on `page=15` vs `page=16`: the all-time table only has
+  `[#, gimmick, # shows]`, so those entries get a new `career_shows` field instead of
+  `active_roles`/`current_brand`/`roster_rating`/`roster_votes`.
+- All-Time Roster also lists tag-team/stable entries (Bloodline, Alpha Academy, etc.),
+  but those link to `id=28`/`id=29` (teams/stables), not `id=2` (wrestlers), so the
+  existing `id=2&nr=` link match already excludes them with no extra filtering needed.
+- New fixture `tests/fixtures/wwe_alltime_roster.html` and three new tests in
+  `test_wrestlers.py` covering the all-time parse path and the cross-page dedup.
+
 ### Outstanding — straightforward follow-up work, not blocked
 - Implement `matches` and `titles` spiders for real (currently stubs). Each needs its own
   live selector pass, same as promotions/wrestlers.
