@@ -33,7 +33,6 @@ least one promotion id, since that's how it finds wrestlers to begin with.
 
 from __future__ import annotations
 
-import html
 import re
 from collections.abc import Iterable
 
@@ -42,6 +41,7 @@ from parsel import Selector
 from ..config import Settings
 from ..items import WrestlerDateRange, WrestlerItem, WrestlerRoleEntry
 from .base import BaseSpider
+from .htmlutils import br_list
 from .promotions import _parse_rating, _parse_votes
 
 ROSTER_URL = "https://www.cagematch.net/?id=8&nr={promotion_id}&page=15"
@@ -85,21 +85,7 @@ def _comma_list(text: str) -> list[str]:
 
 
 def _br_list(content: Selector) -> list[str]:
-    """Split a `<br>`-separated InformationBoxContents div into plain-text lines.
-
-    Uses regex tag-stripping rather than a nested `Selector` because parsel's type
-    auto-detection treats any fragment that happens to parse as valid JSON (e.g. a
-    quoted nickname like `"God's Favourite Champion"`) as JSON, not HTML/text, even
-    when `type="html"` is passed explicitly.
-    """
-    inner_html = content.get() or ""
-    inner_html = re.sub(r"^<div[^>]*>|</div>$", "", inner_html.strip())
-    items: list[str] = []
-    for fragment in re.split(r"<br\s*/?>", inner_html):
-        text = html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
-        if text:
-            items.append(text)
-    return items
+    return br_list(content.get() or "")
 
 
 def _link_texts(content: Selector) -> list[str]:

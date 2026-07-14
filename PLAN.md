@@ -231,10 +231,59 @@ names) that Roster doesn't.
 - New fixture `tests/fixtures/wwe_alltime_roster.html` and three new tests in
   `test_wrestlers.py` covering the all-time parse path and the cross-page dedup.
 
+### Done — matches spider implemented, plus a real concurrency fix
+- **Found and fixed the runner never actually running concurrently.** `runner.py` built
+  an `asyncio.Semaphore(settings.concurrency)` but every fetch was `await`ed one at a
+  time in a plain `for` loop — nothing was ever scheduled concurrently, so
+  `concurrency=2` behaved identically to `concurrency=1`. Rewrote `run()` to walk each
+  `start_requests()` URL (and its `next_page_url` chain) as its own coroutine, gathered
+  concurrently via `asyncio.gather`, with per-item `parse_profile` enrichment also
+  gathered concurrently — all still bounded by the same semaphore. Concurrent writes to
+  the output file are serialized with a lock.
+- Also fixed a related race in `BrowserManager._throttle`: it read-then-slept on
+  `_last_request_at` without a lock, so concurrent callers could all pass the throttle
+  check at once. Now guarded by an `asyncio.Lock` so request *start* times are correctly
+  spaced even under concurrency, while the actual `page.goto`/`page.content` work still
+  happens outside the lock (so network wait overlaps).
+- **Concurrency=4 hit `ERR_TUNNEL_CONNECTION_FAILED`** against the configured proxy in
+  testing (concurrency=2 was stable) — some proxies cap concurrent tunnel connections.
+  Default `concurrency` is `2` (up from a `1`-in-practice baseline, still a real
+  speedup), documented as raisable if the proxy supports it.
+  Added retry-with-backoff (3 attempts) inside `BrowserManager.fetch` for transient
+  navigation errors, and error isolation in `runner.py` (a page that still fails after
+  retries is logged and skipped, not fatal to the whole run) — needed once runs are
+  long enough (thousands of requests) that occasional proxy flakiness is expected.
+- Added `BaseSpider.next_page_url(selector, url) -> str | None`, called by the runner
+  after every list-page `parse`, for spiders whose page count isn't known upfront (the
+  matches spider doesn't know how many event-listing pages a given promotion/year has
+  until it sees a partial page).
+- **Implemented the `matches` spider.** A promotion's event list lives at
+  `?id=8&nr=<id>&page=4&vYear=<year>`, paginated via `s=<offset>` in steps of 100 — same
+  convention as promotions/wrestlers listings. An event's own page (`?id=1&nr=<id>`, no
+  `page=` — cagematch's nav calls this tab "Results") has the full match card with
+  results, not just the lineup, in `<div class="Match">` blocks: match type (+ title
+  link if applicable), `<span class="MatchTitleChange">` marking title changes, "(c)"
+  marking the pre-match champion, "(w/...)" marking valets (not competitors), a
+  matchguide rating, and elimination/misc notes. Non-decisive finishes (draws,
+  no-contests — confirmed live, e.g. "Liv Morgan vs. Sonya Deville - Double Count Out")
+  use "vs." instead of "defeats", so they get `sides` instead of `winners`/`losers`.
+  Because the event page already has full results, there's no reason to fetch anything
+  beyond it — one line per **event** (not per match) with a nested `matches` array,
+  since that avoids repeating event fields on every match and fits the existing
+  `fetch_profile`/`parse_profile` one-extra-request-per-item shape.
+- Extracted `spiders/htmlutils.py` (`strip_tags`, `br_list`) since three spiders now
+  needed the same regex-tag-stripping trick (see `promotions.py`'s
+  `_parse_name_history` / `wrestlers.py`'s old `_br_list` for why a nested `Selector`
+  doesn't work here); `promotions.py` and `wrestlers.py` now import it instead of each
+  keeping their own copy.
+- New fixtures (`wwe_events_2020.html`, `wwe_event_results.html`,
+  `wwe_mania36_results.html` — title changes + 5-way elimination notes,
+  `wwe_dco_event_results.html` — no-decision result) and `tests/test_matches.py`;
+  live-verified with `uv run cagematch scrape matches --limit 5` through the proxy.
+
 ### Outstanding — straightforward follow-up work, not blocked
-- Implement `matches` and `titles` spiders for real (currently stubs). Each needs its own
-  live selector pass, same as promotions/wrestlers.
-- Firm up the `PromotionItem`/`WrestlerItem`/other item schemas once retention needs are
-  clearer (currently deliberately loose per "sort schema later").
+- Implement `titles` spider for real (currently a stub).
+- Firm up the `PromotionItem`/`WrestlerItem`/`MatchItem` schemas once retention needs
+  are clearer (currently deliberately loose per "sort schema later").
 - Activate `.github/workflows/scrape.yml.example` (rename to `.yml`) once the team is ready
   for scheduled/CI runs — currently intentionally left inactive.

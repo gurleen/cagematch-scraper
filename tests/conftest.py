@@ -38,3 +38,23 @@ def wrestler_profile_rusev_html() -> str:
 @pytest.fixture
 def wrestler_profile_multirange_html() -> str:
     return (FIXTURES_DIR / "wrestler_profile_multirange.html").read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def wwe_events_2020_html() -> str:
+    return (FIXTURES_DIR / "wwe_events_2020.html").read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def wwe_event_results_html() -> str:
+    return (FIXTURES_DIR / "wwe_event_results.html").read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def wwe_mania36_results_html() -> str:
+    return (FIXTURES_DIR / "wwe_mania36_results.html").read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def wwe_dco_event_results_html() -> str:
+    return (FIXTURES_DIR / "wwe_dco_event_results.html").read_text(encoding="utf-8")

@@ -29,3 +29,12 @@ class BaseSpider(ABC):
     def parse_profile(self, selector: Selector, item: dict) -> dict:
         """Optionally enrich `item` using its profile page. Default: no-op."""
         return item
+
+    def next_page_url(self, selector: Selector, url: str) -> str | None:
+        """Optionally return a follow-up URL to fetch after `url` (e.g. the next page
+        of a listing whose total page count isn't known upfront). Called by the runner
+        after `parse` on every list-page fetch (not on profile-page fetches). Default:
+        no follow-up — use when a spider's `start_requests` already enumerates every
+        page it needs (as `promotions.py`/`wrestlers.py` do).
+        """
+        return None

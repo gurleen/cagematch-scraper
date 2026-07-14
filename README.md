@@ -16,6 +16,7 @@ uv run patchright install chromium
 uv run cagematch list-spiders
 uv run cagematch scrape promotions --limit 20
 uv run cagematch scrape wrestlers --limit 20
+uv run cagematch scrape matches --limit 20
 uv run cagematch scrape wrestlers --headful       # visible browser, for debugging
 uv run cagematch scrape wrestlers --no-profiles   # skip per-item profile fetch (see below)
 ```
@@ -32,15 +33,25 @@ file (see `.env.example`). Notably:
 - `CAGEMATCH_USER_DATA_DIR` — set to persist a browser profile/cookies across runs.
 - `CAGEMATCH_BLOCK_RESOURCES` — default `true`; skips loading images/media/fonts/CSS to
   cut bandwidth.
+- `CAGEMATCH_CONCURRENCY` — default `2`; max concurrent in-flight page fetches (list
+  pages and profile pages both draw from this). Raise it if your proxy can handle more
+  simultaneous connections — some cap concurrent tunnels, which shows up as
+  `ERR_TUNNEL_CONNECTION_FAILED`.
+- `CAGEMATCH_REQUEST_DELAY` — default `1.5` seconds; minimum spacing between request
+  *start* times, enforced even under concurrency.
 - `CAGEMATCH_PROXY_SERVER` / `_USERNAME` / `_PASSWORD` / `_BYPASS` — route browser traffic
   through a single upstream proxy. Unset by default; runs direct.
 - `CAGEMATCH_PROXY_LIST_FILE` — path to a file of `USERNAME:PASSWORD@HOST:PORT` lines (one
   per proxy), default `proxy-creds.txt`. Ignored if `CAGEMATCH_PROXY_SERVER` is set. Each
   `cagematch scrape` invocation advances to the next distinct proxy in the list.
 - `CAGEMATCH_PROMOTION_IDS` — comma-separated cagematch promotion ids to restrict
-  scraping to. Default `1,2287` (WWE, AEW). The `wrestlers` spider uses this list to find
-  wrestlers (via each promotion's roster), so it always needs at least one id here. Set to
-  an empty string to scrape every promotion (only affects the `promotions` spider).
+  scraping to. Default `1,2287` (WWE, AEW). The `wrestlers` and `matches` spiders use
+  this list to find their data (via each promotion's roster/events), so both always need
+  at least one id here. Set to an empty string to scrape every promotion (only affects
+  the `promotions` spider).
+- `CAGEMATCH_MATCHES_SINCE_YEAR` — default `2020`; earliest year (inclusive) the
+  `matches` spider fetches events for. It walks every year from this one through the
+  current year, for each promotion in `CAGEMATCH_PROMOTION_IDS`.
 
 ## Spiders
 
@@ -61,8 +72,16 @@ file (see `.env.example`). Notably:
   role history (each role's date range(s), since a wrestler can hold the same role in
   separate stints). Pass `--no-profiles` to only get the roster-level fields (name,
   roles, brand, rating, or — for all-time-roster-only entries — a show count).
-- `matches`, `titles` — stubs; each raises `NotImplementedError` naming its planned
-  target URL.
+- `matches` — walks each promotion's event list (year by year, from
+  `CAGEMATCH_MATCHES_SINCE_YEAR` onward) and fetches each event's results page. Each
+  output line is one **event**, with all of its matches nested under `matches` (not one
+  line per match — event fields like date/location aren't repeated per match). Each
+  match record has its type, title (if any) and whether it changed hands, duration,
+  finish note (for draws/no-contests), a matchguide rating if voted on, elimination/other
+  notes, and `winners`/`losers` (or `sides` for a non-decisive result) — each side listing
+  its wrestlers, any named team/stable, valets (accompanying but not competing), and
+  whether it was the side defending a title coming in.
+- `titles` — stub; raises `NotImplementedError` naming its planned target URL.
 
 ## Tests
 
