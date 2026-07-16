@@ -41,9 +41,9 @@ from datetime import datetime, timezone
 from parsel import Selector
 
 from ..config import Settings
-from ..items import MatchItem, MatchRecord, MatchSide
+from ..items import MatchItem, MatchParticipant, MatchRecord, MatchSide
 from .base import BaseSpider
-from .htmlutils import br_list, strip_tags
+from .htmlutils import br_list, info_boxes, strip_tags, text_of
 from .promotions import _parse_rating, _parse_votes
 
 PAGE_SIZE = 100
@@ -154,6 +154,37 @@ def _parse_match_rating(selector: Selector | None) -> tuple[float | None, int | 
     return float(match.group(1)), int(match.group(2))
 
 
+def _parse_commentators(content: Selector) -> list[MatchParticipant]:
+    commentators: list[MatchParticipant] = []
+    for section, nr, text in LINK_RE.findall(content.get() or ""):
+        if section == "2":
+            commentators.append({"id": nr, "name": strip_tags(text)})
+    return commentators
+
+
+def _parse_event_info(selector: Selector) -> dict:
+    """Pull the event page's InformationBox fields (Type/Arena/Broadcast/TV/
+    Commentary) — everything beyond what the promotion's event-listing row already
+    gives us (name/date/location/rating/votes)."""
+    boxes = info_boxes(selector)
+    info: dict = {}
+    if "Type:" in boxes:
+        info["event_type"] = text_of(boxes["Type:"])
+    if "Arena:" in boxes:
+        info["arena"] = text_of(boxes["Arena:"])
+    if "Broadcast type:" in boxes:
+        info["broadcast_type"] = text_of(boxes["Broadcast type:"])
+    if "Broadcast date:" in boxes:
+        info["broadcast_date"] = text_of(boxes["Broadcast date:"])
+    if "TV station/network:" in boxes:
+        info["tv_network"] = text_of(boxes["TV station/network:"])
+    if "Commentary by:" in boxes:
+        commentators = _parse_commentators(boxes["Commentary by:"])
+        if commentators:
+            info["commentators"] = commentators
+    return info
+
+
 class MatchesSpider(BaseSpider):
     name = "matches"
     fetch_profile = True
@@ -223,6 +254,8 @@ class MatchesSpider(BaseSpider):
             yield item
 
     def parse_profile(self, selector: Selector, item: dict) -> dict:
+        item.update(_parse_event_info(selector))
+
         matches: list[MatchRecord] = []
         for index, match_div in enumerate(selector.css("div.Match"), start=1):
             type_selectors = match_div.css("div.MatchType")

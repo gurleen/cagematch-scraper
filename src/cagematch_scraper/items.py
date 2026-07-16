@@ -101,6 +101,12 @@ class MatchItem(TypedDict, total=False):
     location: str
     event_rating: float | None
     event_votes: int | None
+    event_type: str | None  # e.g. "TV-Show", "Live Event"
+    arena: str | None
+    broadcast_type: str | None  # e.g. "Live", "Taped"
+    broadcast_date: str | None
+    tv_network: str | None
+    commentators: list[MatchParticipant]
     matches: list[MatchRecord]
 
 

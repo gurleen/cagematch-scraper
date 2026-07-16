@@ -75,8 +75,14 @@ file (see `.env.example`). Notably:
 - `matches` — walks each promotion's event list (year by year, from
   `CAGEMATCH_MATCHES_SINCE_YEAR` onward) and fetches each event's results page. Each
   output line is one **event**, with all of its matches nested under `matches` (not one
-  line per match — event fields like date/location aren't repeated per match). Each
-  match record has its type, title (if any) and whether it changed hands, duration,
+  line per match — event fields like date/location aren't repeated per match).
+
+  Event-level fields: name, date, location, rating/votes (from the listing), plus
+  `event_type` (e.g. "TV-Show", "Premium Live Event"), `arena`, `broadcast_type`
+  ("Live"/"Taped"), `broadcast_date`, `tv_network`, and `commentators` — pulled from the
+  event's own page, no extra request since it's already fetched for the match card.
+
+  Each match record has its type, title (if any) and whether it changed hands, duration,
   finish note (for draws/no-contests), a matchguide rating if voted on, elimination/other
   notes, and `winners`/`losers` (or `sides` for a non-decisive result) — each side listing
   its wrestlers, any named team/stable, valets (accompanying but not competing), and
