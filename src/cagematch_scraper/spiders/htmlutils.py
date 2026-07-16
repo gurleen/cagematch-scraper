@@ -10,6 +10,8 @@ from __future__ import annotations
 import html
 import re
 
+from parsel import Selector
+
 
 def strip_tags(fragment: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
@@ -25,3 +27,20 @@ def br_list(inner_html: str) -> list[str]:
         if text:
             items.append(text)
     return items
+
+
+def text_of(sel: Selector) -> str:
+    return " ".join(sel.css("::text").getall()).strip()
+
+
+def info_boxes(selector: Selector) -> dict[str, Selector]:
+    """cagematch's recurring profile-page layout: a `div.InformationBoxTitle` label
+    (e.g. "Birthday:") immediately followed by a `div.InformationBoxContents` sibling
+    holding the value. Returns `{label: contents_selector}`."""
+    boxes: dict[str, Selector] = {}
+    for title in selector.css("div.InformationBoxTitle"):
+        label = text_of(title)
+        content = title.xpath("following-sibling::div[1]")
+        if content:
+            boxes[label] = content
+    return boxes

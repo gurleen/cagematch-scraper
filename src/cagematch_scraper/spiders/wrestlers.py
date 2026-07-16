@@ -41,7 +41,7 @@ from parsel import Selector
 from ..config import Settings
 from ..items import WrestlerDateRange, WrestlerItem, WrestlerRoleEntry
 from .base import BaseSpider
-from .htmlutils import br_list
+from .htmlutils import br_list, info_boxes as _info_boxes, text_of as _text_of
 from .promotions import _parse_rating, _parse_votes
 
 ROSTER_URL = "https://www.cagematch.net/?id=8&nr={promotion_id}&page=15"
@@ -49,20 +49,6 @@ ALL_TIME_ROSTER_URL = "https://www.cagematch.net/?id=8&nr={promotion_id}&page=16
 PROFILE_URL = "https://www.cagematch.net/?id=2&nr={wrestler_id}"
 ROSTER_LINK_RE = re.compile(r"[?&]id=2&nr=(\d+)")
 ROLE_ENTRY_RE = re.compile(r"^(?P<role>.*?)(?:\s*\((?P<ranges>.+)\))?$")
-
-
-def _text_of(sel: Selector) -> str:
-    return " ".join(sel.css("::text").getall()).strip()
-
-
-def _info_boxes(selector: Selector) -> dict[str, Selector]:
-    boxes: dict[str, Selector] = {}
-    for title in selector.css("div.InformationBoxTitle"):
-        label = _text_of(title)
-        content = title.xpath("following-sibling::div[1]")
-        if content:
-            boxes[label] = content
-    return boxes
 
 
 def _int_prefix(text: str) -> int | None:

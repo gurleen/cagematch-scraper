@@ -114,6 +114,36 @@ def test_parse_profile_title_changes_and_elimination_notes(wwe_mania36_results_h
     ]
 
 
+def test_parse_profile_event_info(wwe_event_results_html: str) -> None:
+    spider = MatchesSpider(Settings(promotion_ids="1"))
+    selector = Selector(text=wwe_event_results_html)
+
+    item = spider.parse_profile(selector, {"id": "297119", "name": "RAW #1440"})
+
+    assert item["event_type"] == "TV-Show"
+    assert item["arena"] == "WWE ThunderDome (Tropicana Field)"
+    assert item["broadcast_type"] == "Live"
+    assert item["broadcast_date"] == "28.12.2020"
+    assert item["tv_network"] == "USA Network"
+    assert item["commentators"] == [
+        {"id": "5663", "name": "Byron Saxton"},
+        {"id": "2879", "name": "Drew McIntyre"},
+        {"id": "676", "name": "Samoa Joe"},
+        {"id": "14314", "name": "Tom Phillips"},
+    ]
+
+
+def test_parse_profile_event_info_taped_ple(wwe_mania36_results_html: str) -> None:
+    spider = MatchesSpider(Settings(promotion_ids="1"))
+    selector = Selector(text=wwe_mania36_results_html)
+
+    item = spider.parse_profile(selector, {"id": "225351", "name": "WrestleMania 36"})
+
+    assert item["event_type"] == "Premium Live Event"
+    assert item["broadcast_type"] == "Taped"
+    assert item["tv_network"] == "WWE Network"
+
+
 def test_parse_profile_no_decision_result(wwe_dco_event_results_html: str) -> None:
     spider = MatchesSpider(Settings(promotion_ids="1"))
     selector = Selector(text=wwe_dco_event_results_html)

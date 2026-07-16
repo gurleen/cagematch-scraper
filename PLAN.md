@@ -281,7 +281,34 @@ names) that Roster doesn't.
   `wwe_dco_event_results.html` — no-decision result) and `tests/test_matches.py`;
   live-verified with `uv run cagematch scrape matches --limit 5` through the proxy.
 
+### Done — matches spider now also captures event-level info, not just the card
+The full 2020-onward live run (4,008 events, 22,162 matches, both promotions) got
+interrupted by a machine crash partway through; `--resume` picked it back up cleanly
+using the already-merged resume support, with zero corrupt lines. Afterward, asked
+whether event data (not just match data) was captured — it was (name/date/location/
+rating/votes), but not everything visible on the event's own page. Added the rest,
+still from the same page fetch (no extra request):
+- `event_type` (e.g. "TV-Show", "Premium Live Event"), `arena`, `broadcast_type`
+  ("Live"/"Taped"), `broadcast_date`, `tv_network`, `commentators` (id+name, same
+  `MatchParticipant` shape as match participants) — all pulled from the event page's
+  `InformationBoxTitle`/`Contents` pairs, the same layout promotions/wrestlers profile
+  pages use.
+- Extracted `text_of`/`info_boxes` out of `wrestlers.py` into `htmlutils.py` alongside
+  `strip_tags`/`br_list`, since `matches.py` needed the same InformationBox-pair
+  parsing pattern; `wrestlers.py` now imports the shared versions instead of keeping
+  its own copy.
+- New tests in `test_matches.py` covering the event-info fields (including a case
+  missing `Arena:` — cagematch omits it for some events, e.g. NXT UK tapings) and
+  live-verified with a small `--limit 3` run (not a full backfill — deliberately held
+  off per instruction) confirming the fields appear correctly, including the missing
+  field case.
+
 ### Outstanding — straightforward follow-up work, not blocked
+- Full backfill of `data/matches.jsonl` with the new event-info fields hasn't been run
+  yet (the 4,008 events already scraped don't have them) — needs `uv run cagematch
+  scrape matches --resume` re-run, except `--resume` as currently written skips ids
+  already present rather than re-enriching them, so this needs either a fresh run or a
+  resume-mode tweak that re-fetches existing ids to backfill new fields.
 - Implement `titles` spider for real (currently a stub).
 - Firm up the `PromotionItem`/`WrestlerItem`/`MatchItem` schemas once retention needs
   are clearer (currently deliberately loose per "sort schema later").
