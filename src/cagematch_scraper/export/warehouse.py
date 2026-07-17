@@ -142,7 +142,15 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
         for table in reversed(TABLES):
             con.execute(f"DELETE FROM pg.{table}")
         for table in TABLES:
-            con.execute(f"INSERT INTO pg.{table} SELECT * FROM {table}")
+            # Insert by explicit column name rather than positional `SELECT *`: the
+            # Postgres target may be a *superset* of the local table (e.g. an
+            # out-of-band `event_date` column added to Supabase directly), in which
+            # case a positional insert fails with a column-count mismatch. Naming the
+            # local table's columns fills exactly those and leaves any extra Postgres
+            # columns to their own defaults.
+            columns = [desc[0] for desc in con.execute(f"SELECT * FROM {table} LIMIT 0").description]
+            col_list = ", ".join(f'"{c}"' for c in columns)
+            con.execute(f"INSERT INTO pg.{table} ({col_list}) SELECT {col_list} FROM {table}")
         return {table: con.execute(f"SELECT count(*) FROM pg.{table}").fetchone()[0] for table in TABLES}
     finally:
         con.execute("DETACH pg")
