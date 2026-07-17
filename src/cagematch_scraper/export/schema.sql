@@ -96,6 +96,34 @@ CREATE TABLE IF NOT EXISTS titles (
     promotion   VARCHAR
 );
 
+-- One row per reign in a title's "Title Holders" history. Synthetic id:
+-- '<title_id>-<reign_number>'. A reign held by a named tag team/stable populates
+-- team_id/team_name (its members are the title_reign_champions rows); a solo or
+-- bare-co-champion reign leaves them NULL. reign_count is the page's "(N)" suffix
+-- (that team's Nth reign here; a solo champion's own count lives on the champion row).
+CREATE TABLE IF NOT EXISTS title_reigns (
+    id                  VARCHAR PRIMARY KEY,
+    title_id            VARCHAR NOT NULL REFERENCES titles(id),
+    reign_number        INTEGER NOT NULL,
+    from_date           VARCHAR,
+    to_date             VARCHAR,           -- NULL = ongoing ("today" on the page)
+    duration_days       INTEGER,
+    location            VARCHAR,
+    team_id             VARCHAR,           -- set only for named tag-team/stable reigns
+    team_name           VARCHAR,
+    team_reign_count    INTEGER
+);
+
+-- One row per champion in a reign (the solo holder, or each member of the team).
+CREATE TABLE IF NOT EXISTS title_reign_champions (
+    title_reign_id  VARCHAR NOT NULL REFERENCES title_reigns(id),
+    seq             INTEGER NOT NULL,
+    wrestler_id     VARCHAR,
+    wrestler_name   VARCHAR,
+    reign_count     INTEGER,               -- solo champion's "(N)" reign count
+    PRIMARY KEY (title_reign_id, seq)
+);
+
 -- ================================ EVENTS ================================
 -- One row per line in matches.jsonl (the "event")
 

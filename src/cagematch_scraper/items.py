@@ -110,7 +110,46 @@ class MatchItem(TypedDict, total=False):
     matches: list[MatchRecord]
 
 
+class TitleReignChampion(TypedDict, total=False):
+    id: str
+    name: str
+    title_reign_count: int | None  # "(N)" suffix — this wrestler/team's Nth reign
+    # *with this specific title*; None on a first reign
+
+
+class TitleReign(TypedDict, total=False):
+    reign_number: int  # page's own sequential "#N" index
+    champions: list[TitleReignChampion]  # solo, team's members, or bare co-champions
+    team: TitleReignChampion | None  # populated only for the team-entity shape
+    from_date: str | None
+    to_date: str | None  # None = ongoing ("today" marker on page)
+    duration_days: int | None
+    location: str | None
+
+
+class TitleNameHistoryEntry(TypedDict, total=False):
+    name: str
+    from_date: str | None
+    to_date: str | None  # None = current name
+
+
+class TitlePromotionHistoryEntry(TypedDict, total=False):
+    promotion_id: str
+    promotion_name: str
+    from_date: str | None
+    to_date: str | None  # None = current promotion
+
+
 class TitleItem(TypedDict, total=False):
     id: str
     name: str
-    promotion: str
+    profile_url: str
+    promotion: str  # promotion id the titles-list page was fetched for
+    rating: float | None
+    votes: int | None
+    champion_since: str | None  # listing page's "Since" column (raw)
+    status: str | None  # "active" | "inactive"
+    current_name: str | None
+    name_history: list[TitleNameHistoryEntry]
+    promotion_history: list[TitlePromotionHistoryEntry]
+    reigns: list[TitleReign]

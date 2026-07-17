@@ -21,6 +21,15 @@ _CHALLENGE_MARKERS = (
     "sucuri_cloudproxy_js",
 )
 
+# Sucuri's hard IP block ("Access Denied - Website Firewall", Block ID BLACKnn). Unlike
+# the JS challenge above it never clears by waiting — but with a rotating proxy a fresh
+# connection often lands on a clean exit IP, so it's treated as a retryable fetch error
+# (a new page per attempt = a new exit) rather than accepted as valid page content.
+_BLOCK_MARKERS = (
+    "Access Denied - Website Firewall",
+    "Website Security - Access Denied",
+)
+
 _BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
 
 
@@ -110,6 +119,10 @@ class BrowserManager:
     def _is_challenge_page(html: str) -> bool:
         return any(marker in html for marker in _CHALLENGE_MARKERS)
 
+    @staticmethod
+    def _is_blocked_page(html: str) -> bool:
+        return any(marker in html for marker in _BLOCK_MARKERS)
+
     async def fetch(self, url: str) -> str:
         """Navigate to url, ride out the Sucuri JS challenge if present, return HTML.
 
@@ -130,6 +143,11 @@ class BrowserManager:
                     timeout=self._settings.nav_timeout_ms,
                 )
                 html = await page.content()
+
+                if self._is_blocked_page(html):
+                    # Retryable: raise so the attempt loop opens a fresh page (and, with
+                    # a rotating proxy, a new exit IP) rather than returning the block page.
+                    raise PlaywrightError(f"Sucuri firewall blocked {url} (retrying)")
 
                 challenge_attempts = 0
                 while self._is_challenge_page(html) and challenge_attempts < 5:

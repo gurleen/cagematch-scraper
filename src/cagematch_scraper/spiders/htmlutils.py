@@ -12,6 +12,12 @@ import re
 
 from parsel import Selector
 
+# A generic `<a href="?id=<section>&nr=<id>...">text</a>` link, shared by any spider
+# that needs to pull participant/entity links out of an HTML fragment (wrestlers are
+# section "2"; a team/stable entity is one of TEAM_SECTIONS).
+LINK_RE = re.compile(r'<a href="\?id=(\d+)&amp;nr=(\d+)[^"]*">(.*?)</a>')
+TEAM_SECTIONS = {"28", "29"}
+
 
 def strip_tags(fragment: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()

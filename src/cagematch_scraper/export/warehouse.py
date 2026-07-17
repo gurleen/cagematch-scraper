@@ -32,6 +32,8 @@ TABLES = [
     "wrestler_roles",
     "wrestler_role_date_ranges",
     "titles",
+    "title_reigns",
+    "title_reign_champions",
     "events",
     "event_commentators",
     "matches",

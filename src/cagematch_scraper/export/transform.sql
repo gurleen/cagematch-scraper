@@ -143,7 +143,13 @@ ON CONFLICT (wrestler_role_id, seq) DO NOTHING;
 
 CREATE OR REPLACE TEMP VIEW raw_titles AS
 SELECT * FROM read_ndjson('{path}', columns = {
-    id: 'VARCHAR', name: 'VARCHAR', promotion: 'VARCHAR'
+    id: 'VARCHAR', name: 'VARCHAR', promotion: 'VARCHAR',
+    reigns: 'STRUCT(
+        reign_number INTEGER,
+        champions STRUCT(id VARCHAR, name VARCHAR, title_reign_count INTEGER)[],
+        team STRUCT(id VARCHAR, name VARCHAR, title_reign_count INTEGER),
+        from_date VARCHAR, to_date VARCHAR, duration_days INTEGER, location VARCHAR
+    )[]'
 });
 
 INSERT INTO titles
@@ -152,6 +158,32 @@ FROM raw_titles
 ON CONFLICT (id) DO UPDATE SET
     name = excluded.name,
     promotion = excluded.promotion;
+
+-- Reigns are a full per-title snapshot rather than a growing log, so a reload replaces
+-- them wholesale: delete this file's titles' existing reign rows (children first, to
+-- satisfy the FK) and reinsert. This refreshes an ongoing reign's growing duration/end
+-- date in place, and sidesteps DuckDB rejecting `ON CONFLICT DO UPDATE` on a table
+-- referenced by a foreign key (which a plain upsert on title_reigns would hit).
+DELETE FROM title_reign_champions
+WHERE title_reign_id IN (
+    SELECT tr.id FROM title_reigns tr WHERE tr.title_id IN (SELECT id FROM raw_titles)
+);
+DELETE FROM title_reigns WHERE title_id IN (SELECT id FROM raw_titles);
+
+INSERT INTO title_reigns
+SELECT t.id || '-' || r.reign.reign_number::VARCHAR, t.id, r.reign.reign_number,
+       r.reign.from_date, r.reign.to_date, r.reign.duration_days, r.reign.location,
+       r.reign.team.id, r.reign.team.name, r.reign.team.title_reign_count
+FROM raw_titles t, UNNEST(t.reigns) AS r(reign)
+WHERE t.reigns IS NOT NULL;
+
+INSERT INTO title_reign_champions (title_reign_id, seq, wrestler_id, wrestler_name, reign_count)
+SELECT t.id || '-' || r.reign.reign_number::VARCHAR, c.seq - 1, c.champ.id, c.champ.name,
+       c.champ.title_reign_count
+FROM raw_titles t,
+     UNNEST(t.reigns) AS r(reign),
+     UNNEST(r.reign.champions) WITH ORDINALITY AS c(champ, seq)
+WHERE t.reigns IS NOT NULL AND r.reign.champions IS NOT NULL;
 
 -- @source: matches
 
