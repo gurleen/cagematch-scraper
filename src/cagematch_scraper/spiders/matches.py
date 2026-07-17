@@ -43,7 +43,7 @@ from parsel import Selector
 from ..config import Settings
 from ..items import MatchItem, MatchParticipant, MatchRecord, MatchSide
 from .base import BaseSpider
-from .htmlutils import br_list, info_boxes, strip_tags, text_of
+from .htmlutils import LINK_RE, TEAM_SECTIONS, br_list, info_boxes, strip_tags, text_of
 from .promotions import _parse_rating, _parse_votes
 
 PAGE_SIZE = 100
@@ -52,7 +52,6 @@ EVENT_URL = "https://www.cagematch.net/?id=1&nr={event_id}"
 EVENT_LINK_RE = re.compile(r"^\?id=1&nr=(\d+)$")
 
 TITLE_LINK_RE = re.compile(r'<a href="\?id=5&amp;nr=(\d+)[^"]*">(.*?)</a>')
-LINK_RE = re.compile(r'<a href="\?id=(\d+)&amp;nr=(\d+)[^"]*">(.*?)</a>')
 VALET_RE = re.compile(r"\(w/(.*?)\)")
 DURATION_RE = re.compile(r"\((\d{1,3}:\d{2}(?::\d{2})?)\)")
 TITLE_CHANGE_RE = re.compile(r'\s*-\s*<span class="MatchTitleChange">.*?</span>')
@@ -60,7 +59,6 @@ DEFEATS_RE = re.compile(r"\bdefeats?\b")
 VS_SPLIT_RE = re.compile(r"\s*vs\.?\s*")
 AND_SPLIT_RE = re.compile(r"\s+and\s+")
 MATCH_RATING_RE = re.compile(r"Matchguide Rating:\s*([\d.]+)\s*based on\s*(\d+)\s*votes")
-TEAM_SECTIONS = {"28", "29"}
 
 
 def _parse_match_type(selector: Selector) -> tuple[str | None, str | None, str]:
