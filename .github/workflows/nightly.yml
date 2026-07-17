@@ -1,0 +1,68 @@
+name: Nightly scrape + sync to Supabase
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      # data/ (jsonl history, warehouse.duckdb, cursors) persists across runs here so
+      # `--resume`/`export nightly` stay incremental instead of redoing everything.
+      # Cache entries are immutable per-key, so we always save a fresh run-id key and
+      # restore the most recent prior one via the restore-keys prefix fallback.
+      - name: Restore data/ cache
+        uses: actions/cache@v4
+        with:
+          path: data/
+          key: cagematch-data-${{ github.run_id }}
+          restore-keys: |
+            cagematch-data-
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.17"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install patchright browser
+        run: uv run patchright install chromium --with-deps
+
+      - name: Scrape promotions
+        run: uv run cagematch scrape promotions --resume
+        env:
+          CAGEMATCH_HEADLESS: "true"
+          # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
+          # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
+          # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
+
+      - name: Scrape wrestlers
+        run: uv run cagematch scrape wrestlers --resume
+        env:
+          CAGEMATCH_HEADLESS: "true"
+          # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
+          # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
+          # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
+
+      - name: Scrape matches
+        run: uv run cagematch scrape matches --resume
+        env:
+          CAGEMATCH_HEADLESS: "true"
+          # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
+          # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
+          # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
+
+      - name: Flatten into the warehouse
+        run: uv run cagematch export nightly
+
+      - name: Sync to Supabase
+        run: uv run cagematch export sync-postgres
+        env:
+          CAGEMATCH_POSTGRES_URL: ${{ secrets.SUPABASE_DB_URL }}

@@ -37,6 +37,17 @@ class Settings(BaseSettings):
     user_data_dir: Path | None = None
     block_resources: bool = True
 
+    #: Persistent DuckDB warehouse holding the flattened relational tables (see
+    #: export/schema.sql) and the parquet files exported from it.
+    warehouse_path: Path = Path("data/warehouse.duckdb")
+    parquet_dir: Path = Path("data/parquet")
+    export_cursor_path: Path = Path("data/.export_cursor.json")
+
+    #: Postgres connection string `export sync-postgres` mirrors the warehouse into
+    #: (e.g. a Supabase session-pooler URL). Unset by default; the command errors
+    #: clearly if it's needed but missing.
+    postgres_url: str | None = None
+
     #: Comma-separated cagematch promotion ids to restrict promotion/wrestler/match
     #: scraping to. Default: WWE (1), AEW (2287). Empty string disables filtering
     #: (promotions spider only — wrestlers/matches always need at least one promotion,
