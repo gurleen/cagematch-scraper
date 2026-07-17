@@ -5,6 +5,7 @@ description = "Scraper for cagematch.net promotion/wrestler/match/title data"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "duckdb>=1.5.4",
     "parsel>=1.11.0",
     "patchright>=1.61.2",
     "pydantic>=2.13.4",

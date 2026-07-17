@@ -52,6 +52,10 @@ file (see `.env.example`). Notably:
 - `CAGEMATCH_MATCHES_SINCE_YEAR` — default `2020`; earliest year (inclusive) the
   `matches` spider fetches events for. It walks every year from this one through the
   current year, for each promotion in `CAGEMATCH_PROMOTION_IDS`.
+- `CAGEMATCH_POSTGRES_URL` — Postgres connection string `cagematch export
+  sync-postgres` mirrors the warehouse into (see "Exporting to a relational
+  warehouse" below). Unset by default; the command errors clearly if it's needed but
+  missing.
 
 ## Spiders
 
@@ -89,6 +93,44 @@ file (see `.env.example`). Notably:
   whether it was the side defending a title coming in.
 - `titles` — stub; raises `NotImplementedError` naming its planned target URL.
 
+## Exporting to a relational warehouse
+
+`cagematch export` flattens `data/*.jsonl` into the relational schema in
+`src/cagematch_scraper/export/schema.sql` (promotions, wrestlers, events, matches, and
+their child/junction tables — no nested lists/structs), stored in a local DuckDB file
+and exported as parquet:
+
+```bash
+uv run cagematch export backfill              # full rebuild from data/*.jsonl
+uv run cagematch export backfill --fresh      # ...deleting the existing warehouse first
+uv run cagematch export nightly               # only load newly-appended jsonl lines
+```
+
+Output: `data/warehouse.duckdb` (the persistent relational source of truth —
+`ON CONFLICT`-based inserts, safe to rerun) and `data/parquet/<table>.parquet` (one
+file per table, fully rewritten each run). `nightly` uses `data/.export_cursor.json`
+(a per-file line count) purely as a fast path to skip unchanged jsonl files — it never
+gates correctness, since every load is deduped against the warehouse regardless.
+
+To mirror the warehouse into a Postgres database (e.g. Supabase):
+
+```bash
+CAGEMATCH_POSTGRES_URL="postgresql://..." uv run cagematch export sync-postgres
+```
+
+This is a **full-refresh mirror**, not an incremental upsert: it clears every table and
+reinserts everything from the local warehouse each run (sub-few-second at this data
+scale), using DuckDB's `postgres` extension (`ATTACH ... TYPE postgres`) rather than a
+separate Postgres client. `schema.sql` bootstraps the target database automatically
+(idempotent `CREATE TABLE IF NOT EXISTS`) — no separate migration step needed. Requires
+`CAGEMATCH_POSTGRES_URL`, and `data/warehouse.duckdb` must already exist (run `export
+backfill`/`nightly` first).
+
+For Supabase specifically, use the **session pooler** connection string (port `5432` on
+the pooler host), not the transaction-mode pooler (port `6543`) — transaction mode
+doesn't reliably support the DDL/prepared-statement handshake DuckDB's postgres
+extension needs.
+
 ## Tests
 
 ```bash
@@ -97,6 +139,15 @@ uv run pytest
 
 ## CI
 
-`.github/workflows/scrape.yml.example` is a non-active template (rename to `.yml` to
-enable) showing `uv sync` + `patchright install` + `cagematch scrape`, with proxy env vars
-wired to GitHub secrets.
+`.github/workflows/nightly.yml` runs nightly (and on-demand via `workflow_dispatch`):
+scrape every spider with `--resume`, `cagematch export nightly`, then `cagematch export
+sync-postgres`. `data/` (jsonl history, warehouse, cursor) persists across runs via
+`actions/cache`, so scraping stays incremental instead of restarting from scratch. Needs
+a `SUPABASE_DB_URL` repository secret (the Postgres connection string — session pooler,
+see above) and, if you're scraping through a proxy, the commented-out
+`CAGEMATCH_PROXY_*` secrets in the workflow filled in.
+
+`.github/workflows/scrape.yml.example` is an older, non-active template (rename to
+`.yml` to enable) showing just the scrape step in isolation with proxy env vars wired to
+GitHub secrets — useful as a manual-dispatch-only reference, superseded by
+`nightly.yml` for the automated pipeline.
