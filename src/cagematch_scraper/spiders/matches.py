@@ -18,8 +18,8 @@ the lineup: `<div class="Match">` blocks each containing:
   note>`" instead — no "defeats", so no `winners`/`losers` (see `sides` instead).
   Wrestlers inside a "(w/`<name>`)" span are valets, not competitors, and are recorded
   separately.
-- `MatchRecommendedLine` (matchguide rating) and `MatchNotes` (e.g. elimination order),
-  both optional.
+- `MatchRecommendedLine` (matchguide rating and optional WON star rating) and
+  `MatchNotes` (e.g. elimination order), both optional.
 
 Because the event's own page already has full results, this spider — unlike
 promotions/wrestlers — has no reason to fetch anything beyond it: `fetch_profile`
@@ -152,6 +152,15 @@ def _parse_match_rating(selector: Selector | None) -> tuple[float | None, int | 
     return float(match.group(1)), int(match.group(2))
 
 
+def _parse_won_rating(selector: Selector | None) -> str | None:
+    if selector is None:
+        return None
+    text = selector.css("span.starRating::text").get()
+    if not text:
+        return None
+    return text.strip() or None
+
+
 def _parse_commentators(content: Selector) -> list[MatchParticipant]:
     commentators: list[MatchParticipant] = []
     for section, nr, text in LINK_RE.findall(content.get() or ""):
@@ -271,13 +280,15 @@ class MatchesSpider(BaseSpider):
             }
 
             rating_selectors = match_div.css("div.MatchRecommendedLine")
-            match_rating, match_votes = _parse_match_rating(
-                rating_selectors[0] if rating_selectors else None
-            )
+            rating_line = rating_selectors[0] if rating_selectors else None
+            match_rating, match_votes = _parse_match_rating(rating_line)
             if match_rating is not None:
                 record["match_rating"] = match_rating
             if match_votes is not None:
                 record["match_votes"] = match_votes
+            won_rating = _parse_won_rating(rating_line)
+            if won_rating is not None:
+                record["won_rating"] = won_rating
 
             notes_selectors = match_div.css("div.MatchNotes")
             if notes_selectors:
