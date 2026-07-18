@@ -16,8 +16,9 @@ jobs:
       # `--resume`/`export nightly` stay incremental instead of redoing everything.
       # Cache entries are immutable per-key, so we always save a fresh run-id key and
       # restore the most recent prior one via the restore-keys prefix fallback.
+      # Split restore/save so a failed sync still persists scraped data for the next run.
       - name: Restore data/ cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/
           key: cagematch-data-${{ github.run_id }}
@@ -74,3 +75,10 @@ jobs:
         run: uv run cagematch export sync-postgres
         env:
           CAGEMATCH_POSTGRES_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Save data/ cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: cagematch-data-${{ github.run_id }}

@@ -137,11 +137,12 @@ def _postgres_schema_statements() -> list[str]:
 def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str, int]:
     """Mirror the local warehouse's current state into a Postgres database.
 
-    Full-refresh, not incremental: truncates every table (via CASCADE from the schema
-    roots) and reinserts everything from the local warehouse. The local warehouse is
-    already deduped/idempotent, so a full reinsert is simpler and more robust than
-    depending on `ON CONFLICT` push-down through DuckDB's postgres attachment, and at
-    this data scale (tens of thousands of rows) it's a sub-few-second operation.
+    Full-refresh, not incremental: deletes every table and reinserts everything from
+    the local warehouse. The clear+reinsert runs in a single transaction so a mid-sync
+    failure rolls back instead of leaving tables empty. The local warehouse is already
+    deduped/idempotent, so a full reinsert is simpler and more robust than depending on
+    `ON CONFLICT` push-down through DuckDB's postgres attachment, and at this data scale
+    (tens of thousands of rows) it's a sub-few-second operation.
 
     schema.sql's DDL is run unqualified (not prefixed with the attached catalog name)
     under `USE pg`: DuckDB resolves an unqualified `REFERENCES table(...)` against
@@ -150,7 +151,8 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
     outside of a `USE pg` context (the former because Postgres has no schema literally
     named "pg", the latter because it points at the local warehouse instead). Switching
     the default catalog is the only combination that works for both the CREATE TABLE
-    target and its REFERENCES clause simultaneously.
+    target and its REFERENCES clause simultaneously. DDL is left outside the data
+    transaction — it is idempotent `CREATE TABLE IF NOT EXISTS`.
     """
     local_catalog = con.execute("SELECT current_catalog()").fetchone()[0]
     con.execute("INSTALL postgres; LOAD postgres;")
@@ -168,19 +170,26 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
         # `DELETE` (confirmed via its error output), which doesn't cascade the way a
         # native Postgres `TRUNCATE ... CASCADE` would — so clear tables ourselves in
         # reverse dependency order (children before parents) rather than relying on
-        # CASCADE from the roots.
-        for table in reversed(TABLES):
-            con.execute(f"DELETE FROM pg.{table}")
-        for table in TABLES:
-            # Insert by explicit column name rather than positional `SELECT *`: the
-            # Postgres target may be a *superset* of the local table (e.g. an
-            # out-of-band `event_date` column added to Supabase directly), in which
-            # case a positional insert fails with a column-count mismatch. Naming the
-            # local table's columns fills exactly those and leaves any extra Postgres
-            # columns to their own defaults.
-            columns = [desc[0] for desc in con.execute(f"SELECT * FROM {table} LIMIT 0").description]
-            col_list = ", ".join(f'"{c}"' for c in columns)
-            con.execute(f"INSERT INTO pg.{table} ({col_list}) SELECT {col_list} FROM {table}")
+        # CASCADE from the roots. All writes go to the attached `pg` catalog, so a
+        # single DuckDB transaction (one attached DB) keeps the mirror atomic.
+        con.execute("BEGIN TRANSACTION")
+        try:
+            for table in reversed(TABLES):
+                con.execute(f"DELETE FROM pg.{table}")
+            for table in TABLES:
+                # Insert by explicit column name rather than positional `SELECT *`: the
+                # Postgres target may be a *superset* of the local table (e.g. an
+                # out-of-band `event_date` column added to Supabase directly), in which
+                # case a positional insert fails with a column-count mismatch. Naming the
+                # local table's columns fills exactly those and leaves any extra Postgres
+                # columns to their own defaults.
+                columns = [desc[0] for desc in con.execute(f"SELECT * FROM {table} LIMIT 0").description]
+                col_list = ", ".join(f'"{c}"' for c in columns)
+                con.execute(f"INSERT INTO pg.{table} ({col_list}) SELECT {col_list} FROM {table}")
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
         return {table: con.execute(f"SELECT count(*) FROM pg.{table}").fetchone()[0] for table in TABLES}
     finally:
         con.execute("DETACH pg")

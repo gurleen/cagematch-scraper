@@ -1,0 +1,33 @@
+name: Seed data/ cache from release asset
+
+# One-shot helper: download a `cache-seed` release's data.tar.gz into data/ and
+# save it under a key matched by nightly.yml's `cagematch-data-` restore prefix.
+# Create the release first, e.g.:
+#   tar -czf data.tar.gz data/
+#   gh release create cache-seed data.tar.gz --title "cache seed" --notes "..."
+on:
+  workflow_dispatch:
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download cache-seed release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download cache-seed --pattern 'data.tar.gz'
+          tar -xzf data.tar.gz
+          test -d data
+          ls -la data/
+
+      - name: Save data/ cache
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: cagematch-data-seed-${{ github.run_id }}
