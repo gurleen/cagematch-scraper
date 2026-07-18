@@ -167,8 +167,13 @@ CREATE TABLE IF NOT EXISTS matches (
     result          VARCHAR,               -- 'decisive' | 'no_decision' | 'unknown'
     finish_note     VARCHAR,
     match_rating    DOUBLE,
-    match_votes     INTEGER
+    match_votes     INTEGER,
+    won_rating      VARCHAR                -- e.g. '*****1/2'; optional WON star rating
 );
+
+-- Existing warehouses created before won_rating was added need this ALTER;
+-- CREATE TABLE IF NOT EXISTS alone will not add columns.
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS won_rating VARCHAR;
 
 CREATE TABLE IF NOT EXISTS match_notes (
     match_id    VARCHAR NOT NULL REFERENCES matches(id),
@@ -196,4 +201,162 @@ CREATE TABLE IF NOT EXISTS match_side_participants (
     participant_id      VARCHAR,
     participant_name    VARCHAR,
     PRIMARY KEY (match_side_id, participant_role, seq)
+);
+
+-- ===================== THE SMACKDOWN HOTEL (SDH) =====================
+-- Separate namespace from Cagematch tables. IDs are URL slugs
+-- (titles: '{promo}/{slug}', wrestlers: '{slug}'). Pair downstream.
+
+CREATE TABLE IF NOT EXISTS sdh_titles (
+    id                  VARCHAR PRIMARY KEY,
+    name                VARCHAR NOT NULL,
+    profile_url         VARCHAR,
+    promotion           VARCHAR,
+    brand               VARCHAR,
+    gender              VARCHAR,
+    date_established    VARCHAR,
+    current_champion    VARCHAR,
+    territory           VARCHAR,
+    title_type          VARCHAR,
+    image_url           VARCHAR             -- current belt image (original asset)
+);
+
+-- Warehouses created before image_url was added need the ALTER (IF NOT EXISTS
+-- on CREATE TABLE won't add columns).
+ALTER TABLE sdh_titles ADD COLUMN IF NOT EXISTS image_url VARCHAR;
+
+CREATE TABLE IF NOT EXISTS sdh_title_name_history (
+    title_id    VARCHAR NOT NULL REFERENCES sdh_titles(id),
+    seq         INTEGER NOT NULL,
+    name        VARCHAR NOT NULL,
+    from_date   VARCHAR,
+    to_date     VARCHAR,
+    image_url   VARCHAR,                    -- belt design for this era
+    PRIMARY KEY (title_id, seq)
+);
+
+ALTER TABLE sdh_title_name_history ADD COLUMN IF NOT EXISTS image_url VARCHAR;
+
+-- Synthetic id: '<title_id>-<seq>' (0-based page order, newest first).
+CREATE TABLE IF NOT EXISTS sdh_title_reigns (
+    id              VARCHAR PRIMARY KEY,
+    title_id        VARCHAR NOT NULL REFERENCES sdh_titles(id),
+    seq             INTEGER NOT NULL,
+    reign_number    INTEGER,
+    from_date       VARCHAR,
+    to_date         VARCHAR,
+    duration_days   INTEGER,
+    location        VARCHAR,
+    event_name      VARCHAR,
+    event_url       VARCHAR,
+    notes           VARCHAR,
+    is_vacant       BOOLEAN
+);
+
+CREATE TABLE IF NOT EXISTS sdh_title_reign_champions (
+    title_reign_id  VARCHAR NOT NULL REFERENCES sdh_title_reigns(id),
+    seq             INTEGER NOT NULL,
+    wrestler_id     VARCHAR,
+    wrestler_name   VARCHAR,
+    reign_count     INTEGER,
+    PRIMARY KEY (title_reign_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestlers (
+    id              VARCHAR PRIMARY KEY,
+    name            VARCHAR NOT NULL,
+    profile_url     VARCHAR,
+    real_name       VARCHAR,
+    gender          VARCHAR,
+    birthday        VARCHAR,
+    age             INTEGER,
+    nationality     VARCHAR,
+    birthplace      VARCHAR,
+    billed_from     VARCHAR,
+    height_cm       INTEGER,
+    weight_kg       INTEGER,
+    image_url       VARCHAR                 -- current image (og:image original)
+);
+
+ALTER TABLE sdh_wrestlers ADD COLUMN IF NOT EXISTS image_url VARCHAR;
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_attributes (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    attr_type       VARCHAR NOT NULL,   -- 'nickname' | 'finisher'
+    seq             INTEGER NOT NULL,
+    value           VARCHAR NOT NULL,
+    PRIMARY KEY (wrestler_id, attr_type, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_name_history (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    name            VARCHAR NOT NULL,
+    from_date       VARCHAR,
+    to_date         VARCHAR,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_promotions (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    promotion       VARCHAR NOT NULL,
+    brand           VARCHAR,
+    from_date       VARCHAR,
+    to_date         VARCHAR,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_roles (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    role            VARCHAR NOT NULL,
+    from_date       VARCHAR,
+    to_date         VARCHAR,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_alignments (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    alignment       VARCHAR NOT NULL,
+    details         VARCHAR,
+    from_date       VARCHAR,
+    to_date         VARCHAR,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+-- Dated headshot gallery ("Images History"): label is the page's caption
+-- (e.g. 'Apr 2026'). URLs are stored links, not downloaded assets.
+CREATE TABLE IF NOT EXISTS sdh_wrestler_images (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    label           VARCHAR,
+    image_url       VARCHAR NOT NULL,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+-- ===================== CAGEMATCH <-> SDH CROSSWALK =====================
+-- Derived (not from a JSONL source): built by export/match.sql from the loaded
+-- Cagematch + SDH tables. One row per matched entity pair; `match_method` records
+-- how the link was inferred and `confidence` how strong it is (1.0 = name + birthday).
+-- These are the join keys between the two sources — e.g.
+--   SELECT * FROM wrestlers w
+--   JOIN wrestler_crosswalk x ON x.cagematch_id = w.id
+--   JOIN sdh_wrestlers s ON s.id = x.sdh_id;
+
+CREATE TABLE IF NOT EXISTS wrestler_crosswalk (
+    cagematch_id    VARCHAR NOT NULL REFERENCES wrestlers(id),
+    sdh_id          VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    match_method    VARCHAR NOT NULL,   -- 'name_and_birthday' | 'name' | 'alias'
+    confidence      DOUBLE NOT NULL,
+    PRIMARY KEY (cagematch_id, sdh_id)
+);
+
+CREATE TABLE IF NOT EXISTS title_crosswalk (
+    cagematch_id    VARCHAR NOT NULL REFERENCES titles(id),
+    sdh_id          VARCHAR NOT NULL REFERENCES sdh_titles(id),
+    match_method    VARCHAR NOT NULL,   -- 'name' | 'name_fuzzy'
+    confidence      DOUBLE NOT NULL,
+    PRIMARY KEY (cagematch_id, sdh_id)
 );

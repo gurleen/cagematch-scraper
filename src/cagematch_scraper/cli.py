@@ -83,6 +83,7 @@ def backfill(
             jsonl_path = settings.output_dir / f"{source}.jsonl"
             warehouse.load_source(con, source, jsonl_path)
             new_cursor[source] = export_cursor.count_lines(jsonl_path)
+        warehouse.build_crosswalks(con)
         warehouse.export_parquet(con, settings.parquet_dir)
         export_cursor.save_cursor(settings.export_cursor_path, new_cursor)
         counts = warehouse.table_counts(con)
@@ -114,6 +115,7 @@ def nightly() -> None:
             else:
                 warehouse.load_source(con, source, jsonl_path)
             new_cursor[source] = line_count
+        warehouse.build_crosswalks(con)
         warehouse.export_parquet(con, settings.parquet_dir)
         export_cursor.save_cursor(settings.export_cursor_path, new_cursor)
         counts = warehouse.table_counts(con)
@@ -123,6 +125,31 @@ def nightly() -> None:
     for table, count in counts.items():
         typer.echo(f"{table}: {count} rows")
     typer.echo(f"Wrote parquet files to {settings.parquet_dir}")
+
+
+@export_app.command()
+def match() -> None:
+    """Rebuild the Cagematch<->SDH crosswalk tables from the loaded warehouse."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    settings = Settings()
+
+    if not settings.warehouse_path.exists():
+        typer.echo(
+            f"{settings.warehouse_path} doesn't exist yet. Run 'cagematch export backfill' first.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    con = duckdb.connect(str(settings.warehouse_path))
+    try:
+        warehouse.ensure_schema(con)
+        counts = warehouse.build_crosswalks(con)
+        warehouse.export_parquet(con, settings.parquet_dir)
+    finally:
+        con.close()
+
+    for table, count in counts.items():
+        typer.echo(f"{table}: {count} rows")
 
 
 @export_app.command("sync-postgres")

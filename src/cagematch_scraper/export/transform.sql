@@ -215,7 +215,7 @@ SELECT * FROM read_ndjson('{path}', columns = {
             valets STRUCT(id VARCHAR, name VARCHAR)[],
             is_champion BOOLEAN
         )[],
-        match_rating DOUBLE, match_votes INTEGER, notes VARCHAR[]
+        match_rating DOUBLE, match_votes INTEGER, won_rating VARCHAR, notes VARCHAR[]
     )[]'
 });
 
@@ -246,7 +246,7 @@ ON CONFLICT (event_id, seq) DO NOTHING;
 INSERT INTO matches
 SELECT e.id || '-' || t.m.match_index::VARCHAR, e.id, t.m.match_index, t.m.match_type,
        t.m.title_id, t.m.title_name, t.m.title_change, t.m.duration, t.m.result,
-       t.m.finish_note, t.m.match_rating, t.m.match_votes
+       t.m.finish_note, t.m.match_rating, t.m.match_votes, t.m.won_rating
 FROM raw_matches e, UNNEST(e.matches) AS t(m)
 WHERE e.matches IS NOT NULL
 ON CONFLICT (id) DO UPDATE SET
@@ -258,7 +258,8 @@ ON CONFLICT (id) DO UPDATE SET
     result = excluded.result,
     finish_note = excluded.finish_note,
     match_rating = excluded.match_rating,
-    match_votes = excluded.match_votes;
+    match_votes = excluded.match_votes,
+    won_rating = excluded.won_rating;
 
 INSERT INTO match_notes (match_id, seq, note)
 SELECT e.id || '-' || mt.m.match_index::VARCHAR, nt.seq - 1, nt.note
@@ -373,3 +374,137 @@ FROM (
 WHERE side.valets IS NOT NULL
 
 ON CONFLICT (match_side_id, participant_role, seq) DO NOTHING;
+
+-- @source: sdh_titles
+
+CREATE OR REPLACE TEMP VIEW raw_sdh_titles AS
+SELECT * FROM read_ndjson('{path}', columns = {
+    id: 'VARCHAR', name: 'VARCHAR', profile_url: 'VARCHAR', promotion: 'VARCHAR',
+    brand: 'VARCHAR', gender: 'VARCHAR', date_established: 'VARCHAR',
+    current_champion: 'VARCHAR', territory: 'VARCHAR', title_type: 'VARCHAR',
+    image_url: 'VARCHAR',
+    name_history: 'STRUCT(name VARCHAR, from_date VARCHAR, to_date VARCHAR, image_url VARCHAR)[]',
+    reigns: 'STRUCT(
+        reign_number INTEGER,
+        champions STRUCT(id VARCHAR, name VARCHAR, title_reign_count INTEGER)[],
+        from_date VARCHAR, to_date VARCHAR, duration_days INTEGER, location VARCHAR,
+        event_name VARCHAR, event_url VARCHAR, notes VARCHAR, is_vacant BOOLEAN
+    )[]'
+});
+
+INSERT INTO sdh_titles
+SELECT id, name, profile_url, promotion, brand, gender, date_established,
+       current_champion, territory, title_type, image_url
+FROM raw_sdh_titles
+ON CONFLICT (id) DO UPDATE SET
+    name = excluded.name,
+    profile_url = excluded.profile_url,
+    promotion = excluded.promotion,
+    brand = excluded.brand,
+    gender = excluded.gender,
+    date_established = excluded.date_established,
+    current_champion = excluded.current_champion,
+    territory = excluded.territory,
+    title_type = excluded.title_type,
+    image_url = excluded.image_url;
+
+DELETE FROM sdh_title_name_history WHERE title_id IN (SELECT id FROM raw_sdh_titles);
+INSERT INTO sdh_title_name_history (title_id, seq, name, from_date, to_date, image_url)
+SELECT t.id, h.seq - 1, h.entry.name, h.entry.from_date, h.entry.to_date, h.entry.image_url
+FROM raw_sdh_titles t, UNNEST(t.name_history) WITH ORDINALITY AS h(entry, seq)
+WHERE t.name_history IS NOT NULL;
+
+DELETE FROM sdh_title_reign_champions
+WHERE title_reign_id IN (
+    SELECT tr.id FROM sdh_title_reigns tr WHERE tr.title_id IN (SELECT id FROM raw_sdh_titles)
+);
+DELETE FROM sdh_title_reigns WHERE title_id IN (SELECT id FROM raw_sdh_titles);
+
+INSERT INTO sdh_title_reigns
+SELECT t.id || '-' || (r.seq - 1)::VARCHAR, t.id, r.seq - 1, r.reign.reign_number,
+       r.reign.from_date, r.reign.to_date, r.reign.duration_days, r.reign.location,
+       r.reign.event_name, r.reign.event_url, r.reign.notes, r.reign.is_vacant
+FROM raw_sdh_titles t, UNNEST(t.reigns) WITH ORDINALITY AS r(reign, seq)
+WHERE t.reigns IS NOT NULL;
+
+INSERT INTO sdh_title_reign_champions (title_reign_id, seq, wrestler_id, wrestler_name, reign_count)
+SELECT t.id || '-' || (r.seq - 1)::VARCHAR, c.seq - 1, c.champ.id, c.champ.name,
+       c.champ.title_reign_count
+FROM raw_sdh_titles t,
+     UNNEST(t.reigns) WITH ORDINALITY AS r(reign, seq),
+     UNNEST(r.reign.champions) WITH ORDINALITY AS c(champ, seq)
+WHERE t.reigns IS NOT NULL AND r.reign.champions IS NOT NULL;
+
+-- @source: sdh_wrestlers
+
+CREATE OR REPLACE TEMP VIEW raw_sdh_wrestlers AS
+SELECT * FROM read_ndjson('{path}', columns = {
+    id: 'VARCHAR', name: 'VARCHAR', profile_url: 'VARCHAR', real_name: 'VARCHAR',
+    gender: 'VARCHAR', birthday: 'VARCHAR', age: 'INTEGER', nationality: 'VARCHAR',
+    birthplace: 'VARCHAR', billed_from: 'VARCHAR', height_cm: 'INTEGER', weight_kg: 'INTEGER',
+    image_url: 'VARCHAR',
+    nicknames: 'VARCHAR[]', finishers: 'VARCHAR[]',
+    name_history: 'STRUCT(name VARCHAR, from_date VARCHAR, to_date VARCHAR)[]',
+    promotions: 'STRUCT(promotion VARCHAR, brand VARCHAR, from_date VARCHAR, to_date VARCHAR)[]',
+    roles: 'STRUCT(role VARCHAR, from_date VARCHAR, to_date VARCHAR)[]',
+    alignments: 'STRUCT(alignment VARCHAR, details VARCHAR, from_date VARCHAR, to_date VARCHAR)[]',
+    images: 'STRUCT(label VARCHAR, image_url VARCHAR)[]'
+});
+
+INSERT INTO sdh_wrestlers
+SELECT id, name, profile_url, real_name, gender, birthday, age, nationality,
+       birthplace, billed_from, height_cm, weight_kg, image_url
+FROM raw_sdh_wrestlers
+ON CONFLICT (id) DO UPDATE SET
+    name = excluded.name,
+    profile_url = excluded.profile_url,
+    real_name = excluded.real_name,
+    gender = excluded.gender,
+    birthday = excluded.birthday,
+    age = excluded.age,
+    nationality = excluded.nationality,
+    birthplace = excluded.birthplace,
+    billed_from = excluded.billed_from,
+    height_cm = excluded.height_cm,
+    weight_kg = excluded.weight_kg,
+    image_url = excluded.image_url;
+
+DELETE FROM sdh_wrestler_attributes WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_attributes (wrestler_id, attr_type, seq, value)
+SELECT w.id, 'nickname', t.seq - 1, t.val
+FROM raw_sdh_wrestlers w, UNNEST(w.nicknames) WITH ORDINALITY AS t(val, seq)
+WHERE w.nicknames IS NOT NULL
+UNION ALL
+SELECT w.id, 'finisher', t.seq - 1, t.val
+FROM raw_sdh_wrestlers w, UNNEST(w.finishers) WITH ORDINALITY AS t(val, seq)
+WHERE w.finishers IS NOT NULL;
+
+DELETE FROM sdh_wrestler_name_history WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_name_history (wrestler_id, seq, name, from_date, to_date)
+SELECT w.id, t.seq - 1, t.entry.name, t.entry.from_date, t.entry.to_date
+FROM raw_sdh_wrestlers w, UNNEST(w.name_history) WITH ORDINALITY AS t(entry, seq)
+WHERE w.name_history IS NOT NULL;
+
+DELETE FROM sdh_wrestler_promotions WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_promotions (wrestler_id, seq, promotion, brand, from_date, to_date)
+SELECT w.id, t.seq - 1, t.entry.promotion, t.entry.brand, t.entry.from_date, t.entry.to_date
+FROM raw_sdh_wrestlers w, UNNEST(w.promotions) WITH ORDINALITY AS t(entry, seq)
+WHERE w.promotions IS NOT NULL;
+
+DELETE FROM sdh_wrestler_roles WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_roles (wrestler_id, seq, role, from_date, to_date)
+SELECT w.id, t.seq - 1, t.entry.role, t.entry.from_date, t.entry.to_date
+FROM raw_sdh_wrestlers w, UNNEST(w.roles) WITH ORDINALITY AS t(entry, seq)
+WHERE w.roles IS NOT NULL;
+
+DELETE FROM sdh_wrestler_alignments WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_alignments (wrestler_id, seq, alignment, details, from_date, to_date)
+SELECT w.id, t.seq - 1, t.entry.alignment, t.entry.details, t.entry.from_date, t.entry.to_date
+FROM raw_sdh_wrestlers w, UNNEST(w.alignments) WITH ORDINALITY AS t(entry, seq)
+WHERE w.alignments IS NOT NULL;
+
+DELETE FROM sdh_wrestler_images WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_images (wrestler_id, seq, label, image_url)
+SELECT w.id, t.seq - 1, t.entry.label, t.entry.image_url
+FROM raw_sdh_wrestlers w, UNNEST(w.images) WITH ORDINALITY AS t(entry, seq)
+WHERE w.images IS NOT NULL;

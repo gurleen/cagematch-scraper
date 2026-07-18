@@ -59,6 +59,14 @@ jobs:
           # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
           # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
 
+      # SDH is plain HTTP (no Patchright / Sucuri). Run after Cagematch so a browser
+      # flake doesn't block the cheaper secondary source.
+      - name: Scrape SDH titles
+        run: uv run cagematch scrape sdh_titles --resume
+
+      - name: Scrape SDH wrestlers
+        run: uv run cagematch scrape sdh_wrestlers --resume
+
       - name: Flatten into the warehouse
         run: uv run cagematch export nightly
 

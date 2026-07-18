@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _EXPORT_DIR = Path(__file__).parent
 _SCHEMA_SQL = (_EXPORT_DIR / "schema.sql").read_text(encoding="utf-8")
 _TRANSFORM_SQL = (_EXPORT_DIR / "transform.sql").read_text(encoding="utf-8")
+_MATCH_SQL = (_EXPORT_DIR / "match.sql").read_text(encoding="utf-8")
 
 # Tables in dependency order (parents before children), used both for parquet export
 # and to report row counts after a load.
@@ -40,10 +41,23 @@ TABLES = [
     "match_notes",
     "match_sides",
     "match_side_participants",
+    "sdh_titles",
+    "sdh_title_name_history",
+    "sdh_title_reigns",
+    "sdh_title_reign_champions",
+    "sdh_wrestlers",
+    "sdh_wrestler_attributes",
+    "sdh_wrestler_name_history",
+    "sdh_wrestler_promotions",
+    "sdh_wrestler_roles",
+    "sdh_wrestler_alignments",
+    "sdh_wrestler_images",
+    "wrestler_crosswalk",
+    "title_crosswalk",
 ]
 
 # Source name -> jsonl filename stem, matches spider names / `-- @source:` markers.
-SOURCES = ["promotions", "wrestlers", "titles", "matches"]
+SOURCES = ["promotions", "wrestlers", "titles", "matches", "sdh_titles", "sdh_wrestlers"]
 
 
 def _split_statements(sql: str) -> list[str]:
@@ -81,6 +95,20 @@ def load_source(con: duckdb.DuckDBPyConnection, source: str, jsonl_path: Path) -
     escaped_path = str(jsonl_path).replace("'", "''")
     for statement in _TRANSFORM_BLOCKS[source]:
         con.execute(statement.replace("{path}", escaped_path))
+
+
+def build_crosswalks(con: duckdb.DuckDBPyConnection) -> dict[str, int]:
+    """Derive the Cagematch<->SDH crosswalk tables (and join views) from loaded data.
+
+    Safe to run repeatedly: each crosswalk is fully rebuilt from the current tables.
+    Returns row counts for the crosswalk tables.
+    """
+    for statement in _split_statements(_MATCH_SQL):
+        con.execute(statement)
+    return {
+        table: con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        for table in ("wrestler_crosswalk", "title_crosswalk")
+    }
 
 
 def table_counts(con: duckdb.DuckDBPyConnection) -> dict[str, int]:

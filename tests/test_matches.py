@@ -74,10 +74,12 @@ def test_parse_profile_decisive_matches_with_valets_and_teams(wwe_event_results_
     assert title_match["losers"] == [{"wrestlers": [{"id": "2641", "name": "Sheamus"}]}]
     assert title_match["match_rating"] == 6.45
     assert title_match["match_votes"] == 21
+    assert title_match["won_rating"] == "*****1/2"
 
     valet_match = matches[1]
     assert valet_match["winners"]["valets"] == [{"id": "4843", "name": "Lince Dorado"}]
     assert valet_match["losers"][0]["valets"] == [{"id": "1099", "name": "John Morrison"}]
+    assert "won_rating" not in valet_match
 
     team_match = matches[6]
     assert team_match["match_type"] == "Eight Man Tag Team Match"

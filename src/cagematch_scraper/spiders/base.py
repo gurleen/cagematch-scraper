@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from typing import Literal
 
 from parsel import Selector
 
@@ -12,6 +13,10 @@ class BaseSpider(ABC):
     """Spiders are constructed as `spider_cls(settings)` (see `cli.py`)."""
 
     name: str
+
+    #: Which transport the runner should use for this spider's fetches.
+    #: Cagematch needs a real browser (Sucuri); SSR sites can use plain HTTP.
+    fetch_backend: Literal["browser", "http"] = "browser"
 
     #: If True, the runner fetches each yielded item's `profile_url` (when present)
     #: and calls `parse_profile` to enrich it before writing. Costs one extra

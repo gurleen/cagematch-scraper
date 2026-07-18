@@ -57,9 +57,18 @@ class Settings(BaseSettings):
     #: Earliest year (inclusive) the matches spider fetches events for.
     matches_since_year: int = 2020
 
+    #: Comma-separated The Smackdown Hotel promotion slugs the SDH spiders restrict to.
+    #: Titles are discovered from each slug's `/title-history/<slug>/` index and
+    #: wrestlers from its `/roster/<slug>/` page (both server-rendered). Default:
+    #: WWE + AEW, mirroring `promotion_ids`.
+    sdh_promotion_slugs: str = "wwe,aew"
+
     def promotion_id_list(self) -> list[str] | None:
         ids = [x.strip() for x in self.promotion_ids.split(",") if x.strip()]
         return ids or None
+
+    def sdh_promotion_slug_list(self) -> list[str]:
+        return [s.strip() for s in self.sdh_promotion_slugs.split(",") if s.strip()]
 
     proxy_server: str | None = None
     proxy_username: str | None = None
