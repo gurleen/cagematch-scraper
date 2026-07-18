@@ -1,10 +1,11 @@
-"""Async orchestrator: drives a spider through the browser and writes JSONL output.
+"""Async orchestrator: drives a spider through a fetcher and writes JSONL output.
 
 Runs concurrently, bounded by `settings.concurrency`: every `start_requests()` URL is
 walked (following `next_page_url` for pagination) as its own concurrent chain, and every
 item found on a page is enriched (`parse_profile`) and written concurrently too. All of
-it shares one `BrowserManager`, so `settings.concurrency` is the real ceiling on
-simultaneous in-flight fetches regardless of how many chains/items are queued.
+it shares one fetcher (`BrowserManager` or `HttpClient`, per `spider.fetch_backend`),
+so `settings.concurrency` is the real ceiling on simultaneous in-flight fetches
+regardless of how many chains/items are queued.
 """
 
 from __future__ import annotations
@@ -13,14 +14,30 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from typing import Protocol
 
 from parsel import Selector
 
 from .browser import BrowserManager
 from .config import Settings
+from .http import HttpClient
 from .spiders.base import BaseSpider
 
 logger = logging.getLogger(__name__)
+
+
+class Fetcher(Protocol):
+    async def __aenter__(self) -> "Fetcher": ...
+
+    async def __aexit__(self, *exc_info) -> None: ...
+
+    async def fetch(self, url: str) -> str: ...
+
+
+def _make_fetcher(spider: BaseSpider, settings: Settings) -> Fetcher:
+    if spider.fetch_backend == "http":
+        return HttpClient(settings)
+    return BrowserManager(settings)
 
 
 def _load_existing_ids(output_path: Path) -> set[str]:
@@ -83,7 +100,7 @@ async def run(
     def limit_reached() -> bool:
         return limit is not None and written >= limit
 
-    async with BrowserManager(settings) as browser:
+    async with _make_fetcher(spider, settings) as fetcher:
         file_mode = "a" if resume and already_done else "w"
         f = output_path.open(file_mode, encoding="utf-8")
         try:
@@ -109,7 +126,7 @@ async def run(
                             return
                         logger.info("Fetching profile %s", profile_url)
                         try:
-                            html = await browser.fetch(profile_url)
+                            html = await fetcher.fetch(profile_url)
                         except Exception:
                             logger.exception(
                                 "Giving up on profile %s after retries; skipping", profile_url
@@ -127,7 +144,7 @@ async def run(
                             return
                         logger.info("Fetching %s", url)
                         try:
-                            html = await browser.fetch(url)
+                            html = await fetcher.fetch(url)
                         except Exception:
                             logger.exception(
                                 "Giving up on list page %s after retries; skipping", url

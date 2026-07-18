@@ -109,6 +109,9 @@ def test_match_sides_decisive_vs_non_decisive(tmp_path: Path) -> None:
                     {
                         "match_index": 1,
                         "result": "decisive",
+                        "match_rating": 8.83,
+                        "match_votes": 984,
+                        "won_rating": "*****1/2",
                         "winners": {
                             "wrestlers": [{"id": "w1", "name": "Winner"}],
                             "is_champion": True,
@@ -135,6 +138,12 @@ def test_match_sides_decisive_vs_non_decisive(tmp_path: Path) -> None:
 
     assert con.execute("SELECT count(*) FROM events").fetchone()[0] == 1
     assert con.execute("SELECT count(*) FROM matches").fetchone()[0] == 2
+
+    won = con.execute(
+        "SELECT won_rating FROM matches WHERE id = 'e1-1'"
+    ).fetchone()
+    assert won == ("*****1/2",)
+    assert con.execute("SELECT won_rating FROM matches WHERE id = 'e1-2'").fetchone() == (None,)
 
     decisive_sides = con.execute(
         "SELECT side_role FROM match_sides WHERE match_id = 'e1-1' ORDER BY side_role"
