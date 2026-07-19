@@ -9,6 +9,10 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # WWE, AEW, ROH, TNA, NJPW, Stardom, CMLL
+      CAGEMATCH_PROMOTION_IDS: "1,2287,4,5,7,745,78"
+      CAGEMATCH_SDH_PROMOTION_SLUGS: "wwe,aew,roh,tna,njpw,stardom,cmll"
     steps:
       - uses: actions/checkout@v4
 
