@@ -180,6 +180,110 @@ def test_load_source_is_idempotent(tmp_path: Path) -> None:
     assert con.execute("SELECT count(*) FROM promotions").fetchone()[0] == 1
 
 
+def test_duplicate_event_lines_keep_only_newest(tmp_path: Path) -> None:
+    """An event scraped both before (announced card, `sides`) and after (results,
+    `winners`/`losers`) it airs appends two lines for the same id. Only the newest
+    line's rows may survive — the stale `-side-N` match_sides must not linger
+    alongside the `-winner-0`/`-loser-N` rows.
+    """
+    path = tmp_path / "matches.jsonl"
+    pre_event = {
+        "id": "e1",
+        "name": "Event (announced)",
+        "matches": [
+            {
+                "match_index": 1,
+                "result": "unknown",
+                "sides": [
+                    {
+                        "wrestlers": [
+                            {"id": "w1", "name": "A"},
+                            {"id": "w2", "name": "B"},
+                        ],
+                        "is_champion": True,
+                    }
+                ],
+            }
+        ],
+    }
+    post_event = {
+        "id": "e1",
+        "name": "Event",
+        "matches": [
+            {
+                "match_index": 1,
+                "result": "decisive",
+                "winners": {"wrestlers": [{"id": "w1", "name": "A"}], "is_champion": True},
+                "losers": [{"wrestlers": [{"id": "w2", "name": "B"}]}],
+            },
+            {
+                "match_index": 2,
+                "result": "decisive",
+                "winners": {"wrestlers": [{"id": "w3", "name": "C"}]},
+                "losers": [{"wrestlers": [{"id": "w4", "name": "D"}]}],
+            },
+        ],
+    }
+    _write_jsonl(path, [pre_event, post_event])
+    con = _fresh_con()
+    warehouse.load_source(con, "matches", path)
+
+    assert con.execute("SELECT name FROM events WHERE id = 'e1'").fetchone() == ("Event",)
+    assert con.execute("SELECT count(*) FROM matches").fetchone()[0] == 2
+    sides = con.execute(
+        "SELECT side_role FROM match_sides WHERE match_id = 'e1-1' ORDER BY side_role"
+    ).fetchall()
+    assert sides == [("loser",), ("winner",)]
+    participants = con.execute(
+        "SELECT match_side_id, participant_id FROM match_side_participants "
+        "WHERE match_side_id LIKE 'e1-1-%' ORDER BY match_side_id"
+    ).fetchall()
+    assert participants == [("e1-1-loser-0", "w2"), ("e1-1-winner-0", "w1")]
+
+
+def test_dedupe_jsonl_returns_none_without_duplicates(tmp_path: Path) -> None:
+    path = tmp_path / "promotions.jsonl"
+    _write_jsonl(path, [{"id": "1", "name": "WWE"}, {"id": "2", "name": "AEW"}])
+    assert warehouse._dedupe_jsonl(path) is None
+
+
+def test_reload_replaces_removed_match_children(tmp_path: Path) -> None:
+    path = tmp_path / "matches.jsonl"
+    first = {
+        "id": "e1",
+        "name": "Event",
+        "commentators": [{"id": "c1", "name": "Commentator"}],
+        "matches": [
+            {
+                "match_index": 1,
+                "result": "decisive",
+                "notes": ["Old note"],
+                "winners": {"wrestlers": [{"id": "w1", "name": "Winner"}]},
+                "losers": [{"wrestlers": [{"id": "w2", "name": "Loser"}]}],
+            }
+        ],
+    }
+    con = _fresh_con()
+    _write_jsonl(path, [first])
+    warehouse.load_source(con, "matches", path)
+
+    updated = {
+        "id": "e1",
+        "name": "Event corrected",
+        "matches": [{"match_index": 1, "result": "unknown"}],
+    }
+    _write_jsonl(path, [updated])
+    warehouse.load_source(con, "matches", path)
+
+    assert con.execute("SELECT name FROM events WHERE id = 'e1'").fetchone() == (
+        "Event corrected",
+    )
+    assert con.execute("SELECT count(*) FROM event_commentators").fetchone()[0] == 0
+    assert con.execute("SELECT count(*) FROM match_notes").fetchone()[0] == 0
+    assert con.execute("SELECT count(*) FROM match_sides").fetchone()[0] == 0
+    assert con.execute("SELECT count(*) FROM match_side_participants").fetchone()[0] == 0
+
+
 def test_export_parquet_writes_all_tables(tmp_path: Path) -> None:
     path = tmp_path / "promotions.jsonl"
     _write_jsonl(path, [{"id": "1", "name": "WWE", "rating": 7.5, "votes": 100}])

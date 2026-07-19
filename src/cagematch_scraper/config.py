@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     warehouse_path: Path = Path("data/warehouse.duckdb")
     parquet_dir: Path = Path("data/parquet")
     export_cursor_path: Path = Path("data/.export_cursor.json")
+    export_changes_path: Path = Path("data/.export_changes.json")
 
     #: Postgres connection string `export sync-postgres` mirrors the warehouse into
     #: (e.g. a Supabase session-pooler URL). Unset by default; the command errors
@@ -76,6 +77,16 @@ class Settings(BaseSettings):
     proxy_bypass: str | None = None
     proxy_list_file: Path | None = Path("proxy-creds.txt")
 
+    #: Proxy-Cheap rotating-residential sticky-session settings used by HybridFetcher.
+    #: It appends `_session-<random>_ttl-<minutes>` to a pool credential's password,
+    #: then rotates to a fresh session/IP after this many HTTP requests (or before the
+    #: provider TTL expires), solving the Sucuri challenge again on the new IP.
+    proxy_session_max_requests: int = 100
+    proxy_session_ttl_minutes: int = 10
+
+    #: Legacy fallback for HybridFetcher when no proxy pool is configured.
+    static_proxy: str | None = None
+
     def proxy_dict(self) -> dict[str, str] | None:
         if not self.proxy_server:
             return None
@@ -108,6 +119,25 @@ class Settings(BaseSettings):
                 }
             )
         return proxies
+
+    def load_static_proxy(self) -> dict[str, str] | None:
+        """Parse `static_proxy` (`USER:PASS@HOST:PORT`) into a playwright-style proxy
+        dict. Returns None when unset; raises on a malformed value rather than silently
+        falling back to a direct connection.
+        """
+        if not self.static_proxy:
+            return None
+        match = _PROXY_LINE_RE.match(self.static_proxy.strip())
+        if not match:
+            raise ValueError(
+                "CAGEMATCH_STATIC_PROXY must look like USER:PASS@HOST:PORT, "
+                f"got {self.static_proxy!r}"
+            )
+        return {
+            "server": f"http://{match.group('host')}:{match.group('port')}",
+            "username": match.group("username"),
+            "password": match.group("password"),
+        }
 
 
 class ProxyPool:

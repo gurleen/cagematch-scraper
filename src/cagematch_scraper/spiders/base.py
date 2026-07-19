@@ -15,8 +15,13 @@ class BaseSpider(ABC):
     name: str
 
     #: Which transport the runner should use for this spider's fetches.
-    #: Cagematch needs a real browser (Sucuri); SSR sites can use plain HTTP.
-    fetch_backend: Literal["browser", "http"] = "browser"
+    #: - "hybrid" (default): one patchright bootstrap to solve the Sucuri challenge,
+    #:   then plain httpx reusing its cookie — what Cagematch spiders want.
+    #: - "browser": every fetch through patchright (the pre-hybrid behavior; needed
+    #:   when scraping through a rotating proxy pool, whose per-request exit IPs
+    #:   invalidate the IP-bound Sucuri cookie the hybrid path depends on).
+    #: - "http": plain httpx with no bootstrap, for SSR sites without a challenge.
+    fetch_backend: Literal["browser", "http", "hybrid"] = "hybrid"
 
     #: If True, the runner fetches each yielded item's `profile_url` (when present)
     #: and calls `parse_profile` to enrich it before writing. Costs one extra

@@ -9,11 +9,15 @@ correctness mechanism).
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import tempfile
 from pathlib import Path
 
 import duckdb
+
+from . import changes as change_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,77 @@ TABLES = [
 # Source name -> jsonl filename stem, matches spider names / `-- @source:` markers.
 SOURCES = ["promotions", "wrestlers", "titles", "matches", "sdh_titles", "sdh_wrestlers"]
 
+# Tables belonging to each top-level JSONL entity, in parent-before-child insert
+# order. Filters use {ids} for a SQL literal list and {catalog} where a child must
+# traverse its parent table. Incremental Postgres sync deletes these in reverse
+# order, then reinserts the current local subtree in this order.
+_SOURCE_SYNC_SPECS: dict[str, list[tuple[str, str]]] = {
+    "promotions": [
+        ("promotions", "id IN ({ids})"),
+        ("promotion_name_history", "promotion_id IN ({ids})"),
+    ],
+    "wrestlers": [
+        ("wrestlers", "id IN ({ids})"),
+        ("wrestler_promotions", "wrestler_id IN ({ids})"),
+        ("wrestler_attributes", "wrestler_id IN ({ids})"),
+        ("wrestler_roles", "wrestler_id IN ({ids})"),
+        (
+            "wrestler_role_date_ranges",
+            "wrestler_role_id IN (SELECT id FROM {catalog}wrestler_roles "
+            "WHERE wrestler_id IN ({ids}))",
+        ),
+    ],
+    "titles": [
+        ("titles", "id IN ({ids})"),
+        ("title_reigns", "title_id IN ({ids})"),
+        (
+            "title_reign_champions",
+            "title_reign_id IN (SELECT id FROM {catalog}title_reigns "
+            "WHERE title_id IN ({ids}))",
+        ),
+    ],
+    "matches": [
+        ("events", "id IN ({ids})"),
+        ("event_commentators", "event_id IN ({ids})"),
+        ("matches", "event_id IN ({ids})"),
+        (
+            "match_notes",
+            "match_id IN (SELECT id FROM {catalog}matches WHERE event_id IN ({ids}))",
+        ),
+        (
+            "match_sides",
+            "match_id IN (SELECT id FROM {catalog}matches WHERE event_id IN ({ids}))",
+        ),
+        (
+            "match_side_participants",
+            "match_side_id IN (SELECT id FROM {catalog}match_sides WHERE match_id IN "
+            "(SELECT id FROM {catalog}matches WHERE event_id IN ({ids})))",
+        ),
+    ],
+    "sdh_titles": [
+        ("sdh_titles", "id IN ({ids})"),
+        ("sdh_title_name_history", "title_id IN ({ids})"),
+        ("sdh_title_reigns", "title_id IN ({ids})"),
+        (
+            "sdh_title_reign_champions",
+            "title_reign_id IN (SELECT id FROM {catalog}sdh_title_reigns "
+            "WHERE title_id IN ({ids}))",
+        ),
+    ],
+    "sdh_wrestlers": [
+        ("sdh_wrestlers", "id IN ({ids})"),
+        ("sdh_wrestler_attributes", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_name_history", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_promotions", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_roles", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_alignments", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_images", "wrestler_id IN ({ids})"),
+    ],
+}
+
+_WRESTLER_CROSSWALK_SOURCES = {"wrestlers", "sdh_wrestlers"}
+_TITLE_CROSSWALK_SOURCES = {"titles", "sdh_titles"}
+
 
 def _split_statements(sql: str) -> list[str]:
     """Split a SQL blob into individual statements on `;`, ignoring semicolons that
@@ -86,15 +161,93 @@ def ensure_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(_SCHEMA_SQL)
 
 
+def _sql_ids(ids: set[str]) -> str:
+    return ", ".join("'" + entity_id.replace("'", "''") + "'" for entity_id in sorted(ids))
+
+
+def _filter_sql(template: str, ids_sql: str, catalog: str = "") -> str:
+    return template.format(ids=ids_sql, catalog=catalog)
+
+
+def _clear_local_children(
+    con: duckdb.DuckDBPyConnection, source: str, ids: set[str]
+) -> None:
+    """Remove list/child rows for entities about to be reloaded.
+
+    Parent rows are upserted by transform.sql. Replacing children wholesale ensures
+    corrections that remove/reorder a note, participant, role, etc. do not leave stale
+    rows behind under the old sequence key.
+    """
+    spec = _SOURCE_SYNC_SPECS.get(source)
+    if not spec or not ids:
+        return
+    ids_sql = _sql_ids(ids)
+    for table, filter_template in reversed(spec[1:]):
+        where = _filter_sql(filter_template, ids_sql)
+        con.execute(f"DELETE FROM {table} WHERE {where}")
+
+
+def _dedupe_jsonl(jsonl_path: Path) -> Path | None:
+    """Return a temp copy of `jsonl_path` keeping only the *last* line per entity id,
+    or None when the file has no duplicate ids (the common case — no copy needed).
+
+    Scrape output is append-only, so a re-scraped entity appears as a second line for
+    the same id. transform.sql flattens the whole file in one pass, and loading both
+    occurrences together corrupts child tables whose synthetic ids differ between
+    scrapes: an event scraped before *and* after it airs keeps its stale announced-card
+    `-side-N` match_sides rows alongside the newer `-winner-0`/`-loser-N` rows, because
+    the differing ids never collide for `ON CONFLICT DO NOTHING` to drop. Keeping only
+    each id's newest line makes the transform see one consistent snapshot per entity.
+
+    Lines with no parseable id are kept as-is. The caller deletes the temp file.
+    """
+    line_ids: list[str | None] = []
+    last_line_for_id: dict[str, int] = {}
+    duplicates = False
+    with jsonl_path.open(encoding="utf-8") as file:
+        for index, line in enumerate(file):
+            entity_id: str | None = None
+            if line.strip():
+                try:
+                    entity_id = str(json.loads(line)["id"])
+                except (json.JSONDecodeError, KeyError):
+                    entity_id = None
+            line_ids.append(entity_id)
+            if entity_id is not None:
+                if entity_id in last_line_for_id:
+                    duplicates = True
+                last_line_for_id[entity_id] = index
+    if not duplicates:
+        return None
+
+    keep = set(last_line_for_id.values())
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".jsonl", delete=False, encoding="utf-8"
+    ) as tmp:
+        with jsonl_path.open(encoding="utf-8") as file:
+            for index, line in enumerate(file):
+                if line_ids[index] is None or index in keep:
+                    tmp.write(line)
+        return Path(tmp.name)
+
+
 def load_source(con: duckdb.DuckDBPyConnection, source: str, jsonl_path: Path) -> None:
     """Flatten one source JSONL file into the warehouse. No-op if the file doesn't exist."""
     if not jsonl_path.exists():
         logger.info("Skipping %s: %s not found", source, jsonl_path)
         return
 
-    escaped_path = str(jsonl_path).replace("'", "''")
-    for statement in _TRANSFORM_BLOCKS[source]:
-        con.execute(statement.replace("{path}", escaped_path))
+    _clear_local_children(con, source, change_manifest.ids_from_jsonl(jsonl_path))
+    deduped_path = _dedupe_jsonl(jsonl_path)
+    if deduped_path is not None:
+        logger.info("Deduplicated %s: loading only each id's newest line", jsonl_path)
+    try:
+        escaped_path = str(deduped_path or jsonl_path).replace("'", "''")
+        for statement in _TRANSFORM_BLOCKS[source]:
+            con.execute(statement.replace("{path}", escaped_path))
+    finally:
+        if deduped_path is not None:
+            deduped_path.unlink(missing_ok=True)
 
 
 def build_crosswalks(con: duckdb.DuckDBPyConnection) -> dict[str, int]:
@@ -141,8 +294,8 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
     the local warehouse. The clear+reinsert runs in a single transaction so a mid-sync
     failure rolls back instead of leaving tables empty. The local warehouse is already
     deduped/idempotent, so a full reinsert is simpler and more robust than depending on
-    `ON CONFLICT` push-down through DuckDB's postgres attachment, and at this data scale
-    (tens of thousands of rows) it's a sub-few-second operation.
+    `ON CONFLICT` push-down through DuckDB's postgres attachment. This is retained for
+    initial bootstrap and recovery; routine updates use `sync_postgres_incremental`.
 
     schema.sql's DDL is run unqualified (not prefixed with the attached catalog name)
     under `USE pg`: DuckDB resolves an unqualified `REFERENCES table(...)` against
@@ -191,5 +344,97 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
             con.execute("ROLLBACK")
             raise
         return {table: con.execute(f"SELECT count(*) FROM pg.{table}").fetchone()[0] for table in TABLES}
+    finally:
+        con.execute("DETACH pg")
+
+
+def sync_postgres_incremental(
+    con: duckdb.DuckDBPyConnection,
+    postgres_url: str,
+    changes: change_manifest.Changes,
+) -> dict[str, int]:
+    """Replace only changed entity subtrees in Postgres.
+
+    Each source's changed IDs are handled in one transaction: dependent rows are
+    deleted child-first and the current DuckDB rows are inserted parent-first. This
+    is both faster than a full mirror and more correct than child-table upserts when
+    a re-scrape removes or reorders list entries.
+
+    Crosswalk tables are tiny and derived globally, so a wrestler/title source change
+    refreshes the corresponding crosswalk in full inside the same transaction.
+    """
+    pending = {
+        source: {str(entity_id) for entity_id in ids}
+        for source, ids in changes.items()
+        if source in _SOURCE_SYNC_SPECS and ids
+    }
+    if not pending:
+        return {}
+
+    refresh_wrestler_crosswalk = bool(_WRESTLER_CROSSWALK_SOURCES & pending.keys())
+    refresh_title_crosswalk = bool(_TITLE_CROSSWALK_SOURCES & pending.keys())
+
+    con.execute("INSTALL postgres; LOAD postgres;")
+    escaped_url = postgres_url.replace("'", "''")
+    con.execute(f"ATTACH '{escaped_url}' AS pg (TYPE postgres)")
+    try:
+        synced: dict[str, int] = {}
+        con.execute("BEGIN TRANSACTION")
+        try:
+            # These reference entity roots, so remove them before deleting a changed
+            # wrestler/title. They are rebuilt below from the current local result.
+            if refresh_wrestler_crosswalk:
+                con.execute("DELETE FROM pg.wrestler_crosswalk")
+            if refresh_title_crosswalk:
+                con.execute("DELETE FROM pg.title_crosswalk")
+
+            for source in SOURCES:
+                ids = pending.get(source)
+                if not ids:
+                    continue
+                ids_sql = _sql_ids(ids)
+                spec = _SOURCE_SYNC_SPECS[source]
+
+                for table, filter_template in reversed(spec):
+                    where = _filter_sql(filter_template, ids_sql, catalog="pg.")
+                    con.execute(f"DELETE FROM pg.{table} WHERE {where}")
+
+                for table, filter_template in spec:
+                    where = _filter_sql(filter_template, ids_sql)
+                    columns = [
+                        desc[0]
+                        for desc in con.execute(f"SELECT * FROM {table} LIMIT 0").description
+                    ]
+                    col_list = ", ".join(f'"{column}"' for column in columns)
+                    row_count = con.execute(
+                        f"SELECT count(*) FROM {table} WHERE {where}"
+                    ).fetchone()[0]
+                    con.execute(
+                        f"INSERT INTO pg.{table} ({col_list}) "
+                        f"SELECT {col_list} FROM {table} WHERE {where}"
+                    )
+                    synced[table] = synced.get(table, 0) + row_count
+
+            for table, refresh in (
+                ("wrestler_crosswalk", refresh_wrestler_crosswalk),
+                ("title_crosswalk", refresh_title_crosswalk),
+            ):
+                if not refresh:
+                    continue
+                columns = [
+                    desc[0] for desc in con.execute(f"SELECT * FROM {table} LIMIT 0").description
+                ]
+                col_list = ", ".join(f'"{column}"' for column in columns)
+                row_count = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+                con.execute(
+                    f"INSERT INTO pg.{table} ({col_list}) SELECT {col_list} FROM {table}"
+                )
+                synced[table] = row_count
+
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+        return synced
     finally:
         con.execute("DETACH pg")

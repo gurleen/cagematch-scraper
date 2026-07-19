@@ -42,7 +42,9 @@ def test_parse_promotions_list(promotions_list_html: str) -> None:
 
 
 def test_parse_promotions_list_filtered_by_default_settings(promotions_list_html: str) -> None:
-    spider = PromotionsSpider(Settings())  # default promotion_ids = WWE, AEW
+    # _env_file=None keeps the developer's .env (which may widen promotion_ids)
+    # from leaking into the default WWE+AEW assumption.
+    spider = PromotionsSpider(Settings(_env_file=None))
     selector = Selector(text=promotions_list_html)
 
     items = list(spider.parse(selector, "https://www.cagematch.net/?id=8&view=promotions"))

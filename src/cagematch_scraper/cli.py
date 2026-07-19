@@ -9,6 +9,7 @@ import duckdb
 import typer
 
 from .config import Settings
+from .export import changes as export_changes
 from .export import cursor as export_cursor
 from .export import warehouse
 from .runner import run
@@ -76,6 +77,7 @@ def backfill(
 
     settings.warehouse_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(settings.warehouse_path))
+    changed: export_changes.Changes = {}
     try:
         warehouse.ensure_schema(con)
         new_cursor: dict[str, int] = {}
@@ -83,8 +85,10 @@ def backfill(
             jsonl_path = settings.output_dir / f"{source}.jsonl"
             warehouse.load_source(con, source, jsonl_path)
             new_cursor[source] = export_cursor.count_lines(jsonl_path)
+            changed[source] = export_changes.ids_from_jsonl(jsonl_path)
         warehouse.build_crosswalks(con)
         warehouse.export_parquet(con, settings.parquet_dir)
+        export_changes.merge(settings.export_changes_path, changed)
         export_cursor.save_cursor(settings.export_cursor_path, new_cursor)
         counts = warehouse.table_counts(con)
     finally:
@@ -104,6 +108,7 @@ def nightly() -> None:
     old_cursor = export_cursor.load_cursor(settings.export_cursor_path)
     settings.warehouse_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(settings.warehouse_path))
+    changed: export_changes.Changes = {}
     try:
         warehouse.ensure_schema(con)
         new_cursor: dict[str, int] = {}
@@ -114,9 +119,13 @@ def nightly() -> None:
                 typer.echo(f"{source}: unchanged ({line_count} lines), skipping")
             else:
                 warehouse.load_source(con, source, jsonl_path)
+                old_count = old_cursor.get(source, 0)
+                start_line = old_count if line_count >= old_count else 0
+                changed[source] = export_changes.ids_from_jsonl(jsonl_path, start_line)
             new_cursor[source] = line_count
         warehouse.build_crosswalks(con)
         warehouse.export_parquet(con, settings.parquet_dir)
+        export_changes.merge(settings.export_changes_path, changed)
         export_cursor.save_cursor(settings.export_cursor_path, new_cursor)
         counts = warehouse.table_counts(con)
     finally:
@@ -153,8 +162,14 @@ def match() -> None:
 
 
 @export_app.command("sync-postgres")
-def sync_postgres() -> None:
-    """Mirror the local DuckDB warehouse into Postgres (e.g. Supabase)."""
+def sync_postgres(
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Replace every Postgres table instead of syncing only entities changed by export",
+    ),
+) -> None:
+    """Sync the local DuckDB warehouse into Postgres (e.g. Supabase)."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings()
 
@@ -176,12 +191,21 @@ def sync_postgres() -> None:
 
     con = duckdb.connect(str(settings.warehouse_path))
     try:
-        counts = warehouse.sync_postgres(con, settings.postgres_url)
+        if full:
+            counts = warehouse.sync_postgres(con, settings.postgres_url)
+        else:
+            pending = export_changes.load(settings.export_changes_path)
+            if not pending:
+                typer.echo("No exported entity changes pending; Postgres is already up to date.")
+                return
+            counts = warehouse.sync_postgres_incremental(con, settings.postgres_url, pending)
     finally:
         con.close()
 
+    export_changes.clear(settings.export_changes_path)
     for table, count in counts.items():
         typer.echo(f"{table}: {count} rows synced")
+    typer.echo("Postgres sync complete (full refresh)." if full else "Postgres incremental sync complete.")
 
 
 def main() -> None:

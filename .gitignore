@@ -7,4 +7,5 @@ user-data-dir/
 .pytest_cache/
 *.egg-info/
 proxy-creds.txt
+static-proxy-creds.txt
 .DS_Store

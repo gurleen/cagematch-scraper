@@ -33,6 +33,14 @@ _BLOCK_MARKERS = (
 _BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
 
 
+def is_challenge_page(html: str) -> bool:
+    return any(marker in html for marker in _CHALLENGE_MARKERS)
+
+
+def is_blocked_page(html: str) -> bool:
+    return any(marker in html for marker in _BLOCK_MARKERS)
+
+
 def _route_filter(route) -> object:
     if route.request.resource_type in _BLOCKED_RESOURCE_TYPES:
         return route.abort()
@@ -115,14 +123,6 @@ class BrowserManager:
                 await asyncio.sleep(remaining)
             self._last_request_at = time.monotonic()
 
-    @staticmethod
-    def _is_challenge_page(html: str) -> bool:
-        return any(marker in html for marker in _CHALLENGE_MARKERS)
-
-    @staticmethod
-    def _is_blocked_page(html: str) -> bool:
-        return any(marker in html for marker in _BLOCK_MARKERS)
-
     async def fetch(self, url: str) -> str:
         """Navigate to url, ride out the Sucuri JS challenge if present, return HTML.
 
@@ -144,19 +144,19 @@ class BrowserManager:
                 )
                 html = await page.content()
 
-                if self._is_blocked_page(html):
+                if is_blocked_page(html):
                     # Retryable: raise so the attempt loop opens a fresh page (and, with
                     # a rotating proxy, a new exit IP) rather than returning the block page.
                     raise PlaywrightError(f"Sucuri firewall blocked {url} (retrying)")
 
                 challenge_attempts = 0
-                while self._is_challenge_page(html) and challenge_attempts < 5:
+                while is_challenge_page(html) and challenge_attempts < 5:
                     logger.info("Sucuri challenge detected for %s, waiting...", url)
                     await page.wait_for_timeout(2000)
                     html = await page.content()
                     challenge_attempts += 1
 
-                if self._is_challenge_page(html):
+                if is_challenge_page(html):
                     raise RuntimeError(f"Sucuri challenge did not clear for {url}")
 
                 return html

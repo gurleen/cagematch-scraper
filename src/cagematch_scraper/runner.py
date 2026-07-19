@@ -3,7 +3,8 @@
 Runs concurrently, bounded by `settings.concurrency`: every `start_requests()` URL is
 walked (following `next_page_url` for pagination) as its own concurrent chain, and every
 item found on a page is enriched (`parse_profile`) and written concurrently too. All of
-it shares one fetcher (`BrowserManager` or `HttpClient`, per `spider.fetch_backend`),
+it shares one fetcher (`HybridFetcher`, `BrowserManager`, or `HttpClient`, per
+`spider.fetch_backend`),
 so `settings.concurrency` is the real ceiling on simultaneous in-flight fetches
 regardless of how many chains/items are queued.
 """
@@ -21,6 +22,7 @@ from parsel import Selector
 from .browser import BrowserManager
 from .config import Settings
 from .http import HttpClient
+from .hybrid import HybridFetcher
 from .spiders.base import BaseSpider
 
 logger = logging.getLogger(__name__)
@@ -37,7 +39,9 @@ class Fetcher(Protocol):
 def _make_fetcher(spider: BaseSpider, settings: Settings) -> Fetcher:
     if spider.fetch_backend == "http":
         return HttpClient(settings)
-    return BrowserManager(settings)
+    if spider.fetch_backend == "browser":
+        return BrowserManager(settings)
+    return HybridFetcher(settings)
 
 
 def _load_existing_ids(output_path: Path) -> set[str]:

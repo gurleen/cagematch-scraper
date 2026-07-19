@@ -42,8 +42,16 @@ file (see `.env.example`). Notably:
 - `CAGEMATCH_PROXY_SERVER` / `_USERNAME` / `_PASSWORD` / `_BYPASS` — route browser traffic
   through a single upstream proxy. Unset by default; runs direct.
 - `CAGEMATCH_PROXY_LIST_FILE` — path to a file of `USERNAME:PASSWORD@HOST:PORT` lines (one
-  per proxy), default `proxy-creds.txt`. Ignored if `CAGEMATCH_PROXY_SERVER` is set. Each
-  `cagematch scrape` invocation advances to the next distinct proxy in the list.
+  per Proxy-Cheap base credential), default `proxy-creds.txt`. The hybrid backend adds
+  `_session-<random>_ttl-<minutes>` to each password, giving patchright and httpx the
+  same residential exit IP for that session.
+- `CAGEMATCH_PROXY_SESSION_MAX_REQUESTS` — default `100`; rotate to a fresh proxy
+  session/IP and solve Sucuri again before request 101.
+- `CAGEMATCH_PROXY_SESSION_TTL_MINUTES` — default `10`; Proxy-Cheap sticky-session TTL.
+  The hybrid backend also rotates before this expires, even if the request budget has
+  not been reached.
+- `CAGEMATCH_STATIC_PROXY` — legacy static-proxy fallback used only when neither an
+  explicit `CAGEMATCH_PROXY_*` nor the proxy pool is configured.
 - `CAGEMATCH_PROMOTION_IDS` — comma-separated cagematch promotion ids to restrict
   scraping to. Default `1,2287` (WWE, AEW). The `wrestlers` and `matches` spiders use
   this list to find their data (via each promotion's roster/events), so both always need
@@ -56,6 +64,23 @@ file (see `.env.example`). Notably:
   sync-postgres` mirrors the warehouse into (see "Exporting to a relational
   warehouse" below). Unset by default; the command errors clearly if it's needed but
   missing.
+
+## Fetch backends
+
+Cagematch sits behind Sucuri CloudProxy, whose JavaScript challenge sets a
+`sucuri_cloudproxy_uuid_*` cookie (~24h TTL) bound to the requesting **exit IP and
+User-Agent**. Spiders pick a transport via `fetch_backend`:
+
+- `hybrid` (default for Cagematch spiders) — creates a Proxy-Cheap sticky session,
+  launches patchright to solve Sucuri on that exit IP, exports the cookie and browser
+  User-Agent, then fetches pages with plain httpx through the same session. It rotates
+  after the configured request budget or TTL and solves the challenge again before
+  continuing. A challenge, HTTP 403, or HTTP 429 triggers an early rotation; failed
+  bootstraps retain the exponential cooldown.
+- `browser` — every fetch through patchright (the pre-hybrid behavior). Use when
+  diagnosing browser-only behavior.
+- `http` — plain httpx with no bootstrap, for SSR sites without a challenge (the
+  Smackdown Hotel spiders).
 
 ## Spiders
 
@@ -103,28 +128,35 @@ and exported as parquet:
 ```bash
 uv run cagematch export backfill              # full rebuild from data/*.jsonl
 uv run cagematch export backfill --fresh      # ...deleting the existing warehouse first
-uv run cagematch export nightly               # only load newly-appended jsonl lines
+uv run cagematch export nightly               # load changed sources and record changed IDs
 ```
 
 Output: `data/warehouse.duckdb` (the persistent relational source of truth —
 `ON CONFLICT`-based inserts, safe to rerun) and `data/parquet/<table>.parquet` (one
 file per table, fully rewritten each run). `nightly` uses `data/.export_cursor.json`
-(a per-file line count) purely as a fast path to skip unchanged jsonl files — it never
-gates correctness, since every load is deduped against the warehouse regardless.
+(a per-file line count) to skip unchanged JSONL files and records appended entity IDs
+in `data/.export_changes.json`. Reloaded entity children are replaced wholesale, so
+removed or reordered list entries do not linger under stale sequence keys.
 
-To mirror the warehouse into a Postgres database (e.g. Supabase):
+To incrementally sync the warehouse into a Postgres database (e.g. Supabase):
 
 ```bash
 CAGEMATCH_POSTGRES_URL="postgresql://..." uv run cagematch export sync-postgres
+CAGEMATCH_POSTGRES_URL="postgresql://..." uv run cagematch export sync-postgres --full
 ```
 
-This is a **full-refresh mirror**, not an incremental upsert: it clears every table and
-reinserts everything from the local warehouse each run (sub-few-second at this data
-scale), using DuckDB's `postgres` extension (`ATTACH ... TYPE postgres`) rather than a
-separate Postgres client. `schema.sql` bootstraps the target database automatically
-(idempotent `CREATE TABLE IF NOT EXISTS`) — no separate migration step needed. Requires
-`CAGEMATCH_POSTGRES_URL`, and `data/warehouse.duckdb` must already exist (run `export
-backfill`/`nightly` first).
+The default command consumes `data/.export_changes.json` and transactionally replaces
+only each changed entity's relational subtree (for an event: event, commentators,
+matches, notes, sides, and participants). The manifest is cleared only after a
+successful commit; with no pending changes, the command exits without connecting.
+This keeps corrections accurate while transferring hundreds of rows instead of the
+entire warehouse.
+
+Use `--full` for the initial Postgres bootstrap, after schema changes, or for recovery.
+It applies `schema.sql`, clears every target table, and reinserts the complete local
+warehouse. Both modes use DuckDB's `postgres` extension
+(`ATTACH ... TYPE postgres`) rather than a separate Postgres client. They require
+`CAGEMATCH_POSTGRES_URL` and an existing `data/warehouse.duckdb`.
 
 For Supabase specifically, use the **session pooler** connection string (port `5432` on
 the pooler host), not the transaction-mode pooler (port `6543`) — transaction mode
