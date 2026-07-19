@@ -64,8 +64,12 @@ jobs:
           # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
           # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
 
+      # Nightly only needs new/updated events. Historical years (default since 2020)
+      # are a one-shot backfill — `--resume` still walks every year list page otherwise.
       - name: Scrape matches
-        run: uv run cagematch scrape matches --resume
+        run: |
+          export CAGEMATCH_MATCHES_SINCE_YEAR="$(date -u +%Y)"
+          uv run cagematch scrape matches --resume
         env:
           CAGEMATCH_HEADLESS: "true"
           # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
