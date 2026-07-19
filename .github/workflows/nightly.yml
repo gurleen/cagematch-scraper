@@ -8,7 +8,11 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 15
+    env:
+      # WWE, AEW, ROH, TNA, NJPW, Stardom, CMLL
+      CAGEMATCH_PROMOTION_IDS: "1,2287,4,5,7,745,78"
+      CAGEMATCH_SDH_PROMOTION_SLUGS: "wwe,aew,roh,tna,njpw,stardom,cmll"
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +50,14 @@ jobs:
 
       - name: Scrape wrestlers
         run: uv run cagematch scrape wrestlers --resume
+        env:
+          CAGEMATCH_HEADLESS: "true"
+          # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
+          # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
+          # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
+
+      - name: Scrape titles
+        run: uv run cagematch scrape titles --resume
         env:
           CAGEMATCH_HEADLESS: "true"
           # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
