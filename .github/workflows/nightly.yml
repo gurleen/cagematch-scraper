@@ -52,6 +52,14 @@ jobs:
           # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
           # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
 
+      - name: Scrape titles
+        run: uv run cagematch scrape titles --resume
+        env:
+          CAGEMATCH_HEADLESS: "true"
+          # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
+          # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
+          # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
+
       - name: Scrape matches
         run: uv run cagematch scrape matches --resume
         env:
