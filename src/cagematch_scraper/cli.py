@@ -38,8 +38,9 @@ def scrape(
     resume: bool = typer.Option(
         False,
         "--resume",
-        help="Skip items already present in data/<spider>.jsonl (from an interrupted run) "
-        "instead of overwriting the file",
+        help="Append to data/<spider>.jsonl instead of overwriting; skip ids already "
+        "present unless the spider opts to refresh them (matches re-fetches incomplete "
+        "or recent events so nightly picks up post-air results)",
     ),
 ) -> None:
     """Run a spider and write its output to data/<spider>.jsonl."""
