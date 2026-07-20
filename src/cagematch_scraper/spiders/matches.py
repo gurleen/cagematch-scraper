@@ -32,9 +32,10 @@ Restricted by `Settings.promotion_ids` (default: WWE + AEW) — like the wrestle
 spider, this one requires at least one promotion id, since that's how it finds events.
 
 Under `--resume`, announced cards scraped before results post are re-fetched: events
-with an empty/missing `matches` list, and any event dated within
-`Settings.matches_refresh_days` of today (including future dates), get a fresh profile
-fetch appended to the JSONL. Older events that already have results stay skipped.
+with an empty/missing `matches` list always refresh, and events dated within
+`Settings.matches_refresh_days` of today (including future dates) refresh even when
+they already have results. Older complete events stay skipped. Each event's results
+page is fetched once; every bout on the card is parsed from that single page.
 """
 
 from __future__ import annotations
