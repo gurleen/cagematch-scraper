@@ -336,6 +336,47 @@ CREATE TABLE IF NOT EXISTS sdh_wrestler_images (
     PRIMARY KEY (wrestler_id, seq)
 );
 
+-- Titles & Accomplishments section on the wrestler profile page.
+CREATE TABLE IF NOT EXISTS sdh_wrestler_career_awards (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    name            VARCHAR NOT NULL,
+    url             VARCHAR,
+    image_url       VARCHAR,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_hall_of_fames (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    name            VARCHAR NOT NULL,
+    category        VARCHAR,
+    year            INTEGER,
+    url             VARCHAR,
+    image_url       VARCHAR,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_title_wins (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    promotion       VARCHAR NOT NULL,
+    title           VARCHAR NOT NULL,
+    times           INTEGER,
+    details         VARCHAR,
+    title_url       VARCHAR,
+    image_url       VARCHAR,
+    source          VARCHAR NOT NULL,   -- 'auto' | 'manual'
+    PRIMARY KEY (wrestler_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS sdh_wrestler_accomplishments (
+    wrestler_id     VARCHAR NOT NULL REFERENCES sdh_wrestlers(id),
+    seq             INTEGER NOT NULL,
+    value           VARCHAR NOT NULL,
+    PRIMARY KEY (wrestler_id, seq)
+);
+
 -- ===================== CAGEMATCH <-> SDH CROSSWALK =====================
 -- Derived (not from a JSONL source): built by export/match.sql from the loaded
 -- Cagematch + SDH tables. One row per matched entity pair; `match_method` records

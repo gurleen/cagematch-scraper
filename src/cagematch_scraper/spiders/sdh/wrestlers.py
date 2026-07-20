@@ -20,11 +20,14 @@ from ...config import Settings
 from ...http import fetch_text_sync
 from ...items import (
     SdhWrestlerAlignmentEntry,
+    SdhWrestlerCareerAwardEntry,
+    SdhWrestlerHallOfFameEntry,
     SdhWrestlerImageEntry,
     SdhWrestlerItem,
     SdhWrestlerNameHistoryEntry,
     SdhWrestlerPromotionEntry,
     SdhWrestlerRoleEntry,
+    SdhWrestlerTitleWinEntry,
 )
 from ..base import BaseSpider
 from .utils import (
@@ -49,6 +52,10 @@ _WRESTLER_URL_RE = re.compile(
     r"^https?://(?:www\.)?thesmackdownhotel\.com/wrestlers/([^/#?]+)/?$"
 )
 _WRESTLER_HREF_RE = re.compile(r"^/wrestlers/([^/#?]+)/?$")
+_TIMES_STRONG_RE = re.compile(r"^x(\d+)$", re.IGNORECASE)
+_MANUAL_TITLE_RE = re.compile(
+    r"^(?:(?P<times>\d+)\s+)?(?P<title>.+?)(?:\s*\((?P<details>[^)]*)\))?\s*$"
+)
 
 
 def discover_roster_urls(promotion_slugs: Iterable[str]) -> list[str]:
@@ -269,6 +276,170 @@ def _parse_images(selector: Selector) -> list[SdhWrestlerImageEntry]:
     return entries
 
 
+def _field_icon_url(node: Selector) -> str | None:
+    return absolute_url(node.css("img.field-value-icon::attr(src)").get())
+
+
+def _parse_career_awards(selector: Selector) -> list[SdhWrestlerCareerAwardEntry]:
+    entries: list[SdhWrestlerCareerAwardEntry] = []
+    for item in selector.css("li.field-entry.career-awards > .field-value > ul > li"):
+        name = clean_text("".join(item.css("a span ::text").getall()))
+        if name is None:
+            name = clean_text("".join(item.css("a ::text").getall()))
+        if name is None:
+            continue
+        entries.append(
+            {
+                "name": name,
+                "url": absolute_url(item.css("a::attr(href)").get()),
+                "image_url": _field_icon_url(item),
+            }
+        )
+    return entries
+
+
+def _parse_hall_of_fames(selector: Selector) -> list[SdhWrestlerHallOfFameEntry]:
+    entries: list[SdhWrestlerHallOfFameEntry] = []
+    rows = selector.css(
+        "li.field-entry.hall-of-fames > .field-value > ul.fields-container > li"
+    )
+    for row in rows:
+        name = clean_text(
+            "".join(row.css(".field-entry.first .field-value ::text").getall())
+        )
+        if name is None:
+            continue
+        # Category is the non-first, non-year field-entry (e.g. "Individual").
+        category = None
+        for field in row.css(".field-entry"):
+            classes = set(field.attrib.get("class", "").split())
+            if "first" in classes or "year" in classes or "from-date" in classes:
+                continue
+            if "to-date" in classes:
+                continue
+            category = clean_text("".join(field.css(".field-value ::text").getall()))
+            if category is not None:
+                break
+        year_text = clean_text(
+            "".join(row.css(".field-entry.year .field-value ::text").getall())
+        )
+        year = int(year_text) if year_text and year_text.isdigit() else None
+        entries.append(
+            {
+                "name": name,
+                "category": category,
+                "year": year,
+                "url": absolute_url(row.css("a::attr(href)").get()),
+                "image_url": _field_icon_url(row),
+            }
+        )
+    return entries
+
+
+def _parse_auto_title_wins(selector: Selector) -> list[SdhWrestlerTitleWinEntry]:
+    entries: list[SdhWrestlerTitleWinEntry] = []
+    container = selector.css("li.field-entry.titles-auto > .field-value")
+    if not container:
+        return entries
+    # Children are alternating h3 + ul.unstyled groups.
+    promotion: str | None = None
+    for child in container.xpath("./*"):
+        tag = (child.xpath("name()").get() or "").lower()
+        if tag == "h3":
+            promotion = clean_text("".join(child.css("::text").getall()))
+            continue
+        if tag != "ul" or promotion is None:
+            continue
+        for item in child.xpath("./li"):
+            link = item.css("a")
+            times = None
+            strong = clean_text(link.css("strong::text").get())
+            if strong is not None:
+                match = _TIMES_STRONG_RE.match(strong)
+                if match:
+                    times = int(match.group(1))
+            # Title text is link text minus the xN strong prefix; strip stray leading '/'.
+            title_parts = [
+                t.strip()
+                for t in link.css("::text").getall()
+                if t.strip() and _TIMES_STRONG_RE.match(t.strip()) is None
+            ]
+            title = clean_text(" ".join(title_parts))
+            if title is not None:
+                title = title.lstrip("/").strip() or None
+            if title is None:
+                continue
+            details = clean_text("".join(item.css(".article-info ::text").getall()))
+            entries.append(
+                {
+                    "promotion": promotion,
+                    "title": title,
+                    "times": times,
+                    "details": details,
+                    "title_url": absolute_url(link.css("::attr(href)").get()),
+                    "image_url": _field_icon_url(item),
+                    "source": "auto",
+                }
+            )
+    return entries
+
+
+def _parse_manual_title_wins(selector: Selector) -> list[SdhWrestlerTitleWinEntry]:
+    entries: list[SdhWrestlerTitleWinEntry] = []
+    container = selector.css("li.field-entry.titles > .field-value")
+    if not container:
+        return entries
+    promotion: str | None = None
+    for child in container.xpath("./*"):
+        tag = (child.xpath("name()").get() or "").lower()
+        if tag == "h3":
+            promotion = clean_text("".join(child.css("::text").getall()))
+            continue
+        if tag != "ul" or promotion is None:
+            continue
+        for item in child.xpath("./li"):
+            raw = clean_text("".join(item.css("::text").getall()))
+            if raw is None:
+                continue
+            match = _MANUAL_TITLE_RE.match(raw)
+            if match is None:
+                continue
+            times_raw = match.group("times")
+            title = clean_text(match.group("title"))
+            if title is None:
+                continue
+            details = clean_text(match.group("details"))
+            if details is not None:
+                details = f"({details})"
+            entries.append(
+                {
+                    "promotion": promotion,
+                    "title": title,
+                    "times": int(times_raw) if times_raw else None,
+                    "details": details,
+                    "title_url": None,
+                    "image_url": None,
+                    "source": "manual",
+                }
+            )
+    return entries
+
+
+def _parse_title_wins(selector: Selector) -> list[SdhWrestlerTitleWinEntry]:
+    return _parse_auto_title_wins(selector) + _parse_manual_title_wins(selector)
+
+
+def _parse_accomplishments(selector: Selector) -> list[str]:
+    values: list[str] = []
+    for item in selector.css(
+        "li.field-entry.accomplishments > .field-value > ul > li"
+    ):
+        text = clean_text("".join(item.css("::text").getall()))
+        if text is not None:
+            values.append(text)
+    return values
+
+
 def _current_weight_kg(selector: Selector) -> int | None:
     first = selector.css(
         "li.field-entry.weight > .field-value > ul.fields-container > li.present "
@@ -322,6 +493,10 @@ def parse_wrestler_page(selector: Selector, url: str) -> SdhWrestlerItem:
         "roles": _parse_roles(selector),
         "alignments": _parse_alignments(selector),
         "images": _parse_images(selector),
+        "career_awards": _parse_career_awards(selector),
+        "hall_of_fames": _parse_hall_of_fames(selector),
+        "title_wins": _parse_title_wins(selector),
+        "accomplishments": _parse_accomplishments(selector),
     }
     return item
 

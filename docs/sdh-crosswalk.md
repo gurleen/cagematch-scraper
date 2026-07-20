@@ -51,6 +51,10 @@ Once you have the `sdh_id`:
 | `sdh_wrestler_attributes` | `attr_type IN ('nickname', 'finisher')` |
 | `sdh_wrestler_roles` | Roles (Wrestler, Manager, ...) with date ranges |
 | `sdh_wrestler_images` | Dated headshot gallery (`label` like `'Apr 2026'`, `image_url`) |
+| `sdh_wrestler_career_awards` | Career awards (e.g. Triple Crown) with optional badge `image_url` and page `url` |
+| `sdh_wrestler_hall_of_fames` | Hall of Fame inductions (`name`, `category`, `year`, optional icon `image_url`) |
+| `sdh_wrestler_title_wins` | Per-wrestler title/tournament summary by promotion (`times`, partners/years in `details`, `source` `auto`/`manual`); not a substitute for reign history |
+| `sdh_wrestler_accomplishments` | Other Accomplishments free-text list (Slammys, PWI, WON, tournaments, …) |
 | `sdh_title_reigns` (+ `sdh_title_reign_champions`) | Reigns with `event_name`/`event_url`, `location`, free-text `notes` (cash-ins, vacancies, injuries), and `is_vacant` rows — richer context than Cagematch reigns |
 
 All child tables key on `wrestler_id = sdh_id` with a `seq` column preserving page order.
