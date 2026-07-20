@@ -60,7 +60,7 @@ class HttpClient:
     async def _throttle(self) -> None:
         async with self._throttle_lock:
             elapsed = time.monotonic() - self._last_request_at
-            remaining = self._settings.request_delay - elapsed
+            remaining = self._settings.next_request_delay() - elapsed
             if remaining > 0:
                 await asyncio.sleep(remaining)
             self._last_request_at = time.monotonic()

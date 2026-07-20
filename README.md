@@ -37,8 +37,9 @@ file (see `.env.example`). Notably:
   pages and profile pages both draw from this). Raise it if your proxy can handle more
   simultaneous connections — some cap concurrent tunnels, which shows up as
   `ERR_TUNNEL_CONNECTION_FAILED`.
-- `CAGEMATCH_REQUEST_DELAY` — default `1.5` seconds; minimum spacing between request
-  *start* times, enforced even under concurrency.
+- `CAGEMATCH_REQUEST_DELAY_MIN` / `CAGEMATCH_REQUEST_DELAY_MAX` — default `0.8` /
+  `1.2` seconds; each request start is spaced by a uniform random delay in that
+  range (per hybrid session slot, or globally for browser/http backends).
 - `CAGEMATCH_PROXY_SERVER` / `_USERNAME` / `_PASSWORD` / `_BYPASS` — route browser traffic
   through a single upstream proxy. Unset by default; runs direct.
 - `CAGEMATCH_PROXY_LIST_FILE` — path to a file of `USERNAME:PASSWORD@HOST:PORT` lines (one

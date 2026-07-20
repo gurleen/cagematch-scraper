@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import random
 import re
 from pathlib import Path
 
@@ -26,11 +27,14 @@ class Settings(BaseSettings):
     channel: str | None = "chromium"
     #: Max concurrent in-flight page fetches. With HybridFetcher + proxies this is
     #: also the sticky-session pool size: each slot gets its own exit IP, Sucuri
-    #: cookie, and per-slot `request_delay` throttle so concurrent fetches do not
+    #: cookie, and per-slot request-delay throttle so concurrent fetches do not
     #: share one residential IP. Without proxies the pool stays a single shared
     #: session. Kept modest by default — raise it when a proxy pool can absorb it.
     concurrency: int = 2
-    request_delay: float = 1.5
+    #: Per-request start spacing is sampled uniformly from
+    #: [`request_delay_min`, `request_delay_max`] seconds (see `next_request_delay`).
+    request_delay_min: float = 0.8
+    request_delay_max: float = 1.2
     nav_timeout_ms: int = 30000
     output_dir: Path = Path("data")
     user_data_dir: Path | None = None
@@ -82,6 +86,14 @@ class Settings(BaseSettings):
 
     def sdh_promotion_slug_list(self) -> list[str]:
         return [s.strip() for s in self.sdh_promotion_slugs.split(",") if s.strip()]
+
+    def next_request_delay(self) -> float:
+        """Seconds to wait before the next request start on a throttle lane."""
+        low = min(self.request_delay_min, self.request_delay_max)
+        high = max(self.request_delay_min, self.request_delay_max)
+        if high <= 0:
+            return 0.0
+        return random.uniform(low, high)
 
     proxy_server: str | None = None
     proxy_username: str | None = None

@@ -244,10 +244,10 @@ class _ProxySession:
         return False, ""
 
     async def throttle(self) -> None:
-        """Space this slot's request starts by at least `request_delay`."""
+        """Space this slot's request starts by a sampled delay from settings."""
         async with self.throttle_lock:
             elapsed = time.monotonic() - self.last_request_at
-            remaining = self.settings.request_delay - elapsed
+            remaining = self.settings.next_request_delay() - elapsed
             if remaining > 0:
                 await asyncio.sleep(remaining)
             self.last_request_at = time.monotonic()

@@ -145,7 +145,8 @@ def test_exclusive_pool_checkouts_distinct_slots(monkeypatch: pytest.MonkeyPatch
         proxy_username="user",
         proxy_password="secret",
         concurrency=3,
-        request_delay=0,
+        request_delay_min=0,
+        request_delay_max=0,
     )
 
     async def fake_rotate(self: _ProxySession, reason: str) -> None:
