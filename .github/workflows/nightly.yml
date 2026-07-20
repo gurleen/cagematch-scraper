@@ -66,14 +66,15 @@ jobs:
 
       # Nightly only needs new/updated events. Historical years (default since 2020)
       # are a one-shot backfill — `--resume` still walks every year list page otherwise.
-      # Matches `--resume` re-fetches incomplete/recent events so a pre-air scrape gets
-      # results on a later run (see Settings.matches_refresh_days).
+      # Matches `--resume` re-fetches incomplete/recent events; events >30 days out only
+      # refresh when event_type is PPV/PLE (see matches_refresh_days / far_future_days).
       - name: Scrape matches
         run: |
           export CAGEMATCH_MATCHES_SINCE_YEAR="$(date -u +%Y)"
           uv run cagematch scrape matches --resume
         env:
           CAGEMATCH_HEADLESS: "true"
+          CAGEMATCH_MATCHES_FAR_FUTURE_DAYS: "30"
           # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
           # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
           # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}

@@ -32,10 +32,13 @@ Restricted by `Settings.promotion_ids` (default: WWE + AEW) — like the wrestle
 spider, this one requires at least one promotion id, since that's how it finds events.
 
 Under `--resume`, announced cards scraped before results post are re-fetched: events
-with an empty/missing `matches` list always refresh, and events dated within
-`Settings.matches_refresh_days` of today (including future dates) refresh even when
-they already have results. Older complete events stay skipped. Each event's results
-page is fetched once; every bout on the card is parsed from that single page.
+with an empty/missing `matches` list always refresh (once inside the near-term
+window), and events dated within `Settings.matches_refresh_days` of today refresh
+even when they already have results. Events more than
+`Settings.matches_far_future_days` ahead only refresh when `event_type` is a
+PPV/PLE — far-out TV/house shows are skipped until they get closer. Older complete
+events stay skipped. Each event's results page is fetched once; every bout on the
+card is parsed from that single page.
 """
 
 from __future__ import annotations
@@ -76,6 +79,16 @@ def _parse_event_date(value: object) -> date | None:
 def _has_match_results(existing: dict) -> bool:
     matches = existing.get("matches")
     return isinstance(matches, list) and len(matches) > 0
+
+
+# Cagematch's "PPVs & PLEs" filter uses these Type: values (see events list showtype).
+_PPV_PLE_TYPES = frozenset({"Pay Per View", "Premium Live Event"})
+
+
+def _is_ppv_ple(existing: dict) -> bool:
+    event_type = existing.get("event_type")
+    return isinstance(event_type, str) and event_type in _PPV_PLE_TYPES
+
 
 TITLE_LINK_RE = re.compile(r'<a href="\?id=5&amp;nr=(\d+)[^"]*">(.*?)</a>')
 VALET_RE = re.compile(r"\(w/(.*?)\)")
@@ -233,14 +246,17 @@ class MatchesSpider(BaseSpider):
         current_year = datetime.now(timezone.utc).year
         self.years = list(range(settings.matches_since_year, current_year + 1))
         self.refresh_days = settings.matches_refresh_days
+        self.far_future_days = settings.matches_far_future_days
         self._seen: set[str] = set()
 
     def should_skip_resume(self, existing: dict) -> bool:
-        """Skip only older events that already have results.
+        """Skip resume fetches that are unlikely to have new card/results data.
 
         Announced cards scraped before an event airs typically have `matches: []`.
-        Nightly `--resume` must re-fetch those (and recent events, whose cards/ratings
-        still change) so results land after the fact. Older complete events stay skipped.
+        Nightly `--resume` re-fetches those once they are near-term (and recent events
+        whose cards/ratings still change). Events more than `far_future_days` ahead
+        only keep refreshing when they are a PPV/PLE — far-out TV/house shows wait.
+        Older complete events stay skipped.
         """
         event_date = _parse_event_date(existing.get("date"))
         if event_date is None:
@@ -248,6 +264,9 @@ class MatchesSpider(BaseSpider):
 
         today = datetime.now(timezone.utc).date()
         age_days = (today - event_date).days
+        days_until = -age_days
+        if days_until > self.far_future_days:
+            return not _is_ppv_ple(existing)
         if age_days <= self.refresh_days:
             return False
         return _has_match_results(existing)
