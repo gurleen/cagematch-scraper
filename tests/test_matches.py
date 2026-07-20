@@ -56,11 +56,47 @@ def test_should_skip_resume_skips_complete_events_outside_refresh_window() -> No
     assert spider.should_skip_resume(existing) is True
 
 
-def test_should_skip_resume_refreshes_future_announced_cards() -> None:
-    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=1))
+def test_should_skip_resume_refreshes_near_future_announced_cards() -> None:
+    spider = MatchesSpider(
+        Settings(promotion_ids="1", matches_refresh_days=1, matches_far_future_days=30)
+    )
     future = datetime.now(timezone.utc).date() + timedelta(days=5)
-    existing = {"id": "1", "date": future.strftime("%d.%m.%Y"), "matches": []}
+    existing = {
+        "id": "1",
+        "date": future.strftime("%d.%m.%Y"),
+        "event_type": "TV-Show",
+        "matches": [],
+    }
     assert spider.should_skip_resume(existing) is False
+
+
+def test_should_skip_resume_skips_far_future_non_ppv() -> None:
+    spider = MatchesSpider(
+        Settings(promotion_ids="1", matches_refresh_days=1, matches_far_future_days=30)
+    )
+    future = datetime.now(timezone.utc).date() + timedelta(days=45)
+    existing = {
+        "id": "1",
+        "date": future.strftime("%d.%m.%Y"),
+        "event_type": "TV-Show",
+        "matches": [],
+    }
+    assert spider.should_skip_resume(existing) is True
+
+
+def test_should_skip_resume_refreshes_far_future_ppv_ple() -> None:
+    spider = MatchesSpider(
+        Settings(promotion_ids="1", matches_refresh_days=1, matches_far_future_days=30)
+    )
+    future = datetime.now(timezone.utc).date() + timedelta(days=45)
+    for event_type in ("Premium Live Event", "Pay Per View"):
+        existing = {
+            "id": "1",
+            "date": future.strftime("%d.%m.%Y"),
+            "event_type": event_type,
+            "matches": [],
+        }
+        assert spider.should_skip_resume(existing) is False, event_type
 
 
 def test_start_requests_one_per_promotion_per_year() -> None:

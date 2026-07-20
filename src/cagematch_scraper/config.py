@@ -59,11 +59,17 @@ class Settings(BaseSettings):
     matches_since_year: int = 2020
 
     #: Under `--resume`, re-fetch events whose date is within this many days of today
-    #: (including future dates) even if they already have match results — late ratings
-    #: and card corrections still land. Incomplete older events (empty/missing `matches`)
-    #: are always refreshed so a pre-air scrape gets results later. Default is 1 (today
-    #: and yesterday) so nightly does not re-pull two weeks of already-complete cards.
+    #: (including near-future dates) even if they already have match results — late
+    #: ratings and card corrections still land. Incomplete older events (empty/missing
+    #: `matches`) are always refreshed so a pre-air scrape gets results later. Default
+    #: is 1 (today and yesterday) so nightly does not re-pull weeks of complete cards.
     matches_refresh_days: int = 1
+
+    #: Under `--resume`, events more than this many days in the future are only
+    #: re-fetched when `event_type` is a PPV/PLE (`Pay Per View` / `Premium Live
+    #: Event`). TV shows, house shows, etc. that far out are left alone until they
+    #: fall inside this window.
+    matches_far_future_days: int = 30
 
     #: Comma-separated The Smackdown Hotel promotion slugs the SDH spiders restrict to.
     #: Titles are discovered from each slug's `/title-history/<slug>/` index and
