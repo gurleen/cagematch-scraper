@@ -321,3 +321,40 @@ def test_postgres_schema_statements_drop_sequence_and_default() -> None:
     wrestler_roles_stmt = next(s for s in statements if s.startswith("CREATE TABLE IF NOT EXISTS wrestler_roles"))
     assert "nextval" not in wrestler_roles_stmt
     assert "id              INTEGER PRIMARY KEY," in wrestler_roles_stmt
+
+
+def test_stash_restore_external_promotion_abbr(tmp_path: Path) -> None:
+    """Supabase may hold operator-owned promotion_abbr rows that FK into promotions."""
+    pg_path = tmp_path / "pg.duckdb"
+    pg = duckdb.connect(str(pg_path))
+    pg.execute("CREATE TABLE promotions (id VARCHAR PRIMARY KEY, name VARCHAR)")
+    pg.execute(
+        "CREATE TABLE promotion_abbr ("
+        "promotion_id VARCHAR REFERENCES promotions(id), abbreviation VARCHAR)"
+    )
+    pg.execute("INSERT INTO promotions VALUES ('1', 'WWE'), ('4', 'ROH')")
+    pg.execute("INSERT INTO promotion_abbr VALUES ('1', 'WWE'), ('4', 'ROH')")
+    pg.close()
+
+    con = duckdb.connect(":memory:")
+    con.execute(f"ATTACH '{pg_path}' AS pg")
+    try:
+        stashes = warehouse._stash_external_children(
+            con, parent_table="promotions", ids_sql="'4'"
+        )
+        assert con.execute("SELECT count(*) FROM pg.promotion_abbr").fetchone()[0] == 1
+        assert con.execute(
+            "SELECT promotion_id FROM pg.promotion_abbr"
+        ).fetchone() == ("1",)
+
+        con.execute("DELETE FROM pg.promotions WHERE id = '4'")
+        con.execute("INSERT INTO pg.promotions VALUES ('4', 'ROH')")
+        warehouse._restore_external_children(con, stashes)
+
+        rows = con.execute(
+            "SELECT promotion_id, abbreviation FROM pg.promotion_abbr ORDER BY promotion_id"
+        ).fetchall()
+        assert rows == [("1", "WWE"), ("4", "ROH")]
+    finally:
+        con.execute("DETACH pg")
+        con.close()
