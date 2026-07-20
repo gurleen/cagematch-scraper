@@ -24,12 +24,11 @@ class Settings(BaseSettings):
     base_url: str = "https://www.cagematch.net"
     headless: bool = True
     channel: str | None = "chromium"
-    #: Max concurrent in-flight page fetches. Each still waits its turn behind
-    #: `request_delay` (see `BrowserManager._throttle`), but with concurrency > 1
-    #: multiple fetches can be in network-wait at once instead of one at a time.
-    #: Kept modest by default — some proxies cap concurrent tunnel connections
-    #: (concurrency=4 hit `ERR_TUNNEL_CONNECTION_FAILED` against the configured proxy
-    #: in testing; concurrency=2 was stable). Raise it if your proxy can take it.
+    #: Max concurrent in-flight page fetches. With HybridFetcher + proxies this is
+    #: also the sticky-session pool size: each slot gets its own exit IP, Sucuri
+    #: cookie, and per-slot `request_delay` throttle so concurrent fetches do not
+    #: share one residential IP. Without proxies the pool stays a single shared
+    #: session. Kept modest by default — raise it when a proxy pool can absorb it.
     concurrency: int = 2
     request_delay: float = 1.5
     nav_timeout_ms: int = 30000

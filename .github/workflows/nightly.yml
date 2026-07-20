@@ -13,6 +13,8 @@ jobs:
       # WWE, AEW, ROH, TNA, NJPW, Stardom, CMLL
       CAGEMATCH_PROMOTION_IDS: "1,2287,4,5,7,745,78"
       CAGEMATCH_SDH_PROMOTION_SLUGS: "wwe,aew,roh,tna,njpw,stardom,cmll"
+      # HybridFetcher sizes its sticky-session pool to this when proxies are configured.
+      CAGEMATCH_CONCURRENCY: "8"
     steps:
       - uses: actions/checkout@v4
 
