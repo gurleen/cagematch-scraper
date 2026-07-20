@@ -109,12 +109,36 @@ async def run(
 
     semaphore = asyncio.Semaphore(settings.concurrency)
     write_lock = asyncio.Lock()
+    # Claim entity ids for the duration of a run so concurrent list chains cannot
+    # schedule two profile fetches for the same id (e.g. co-promoted events).
+    claimed_ids: set[str] = set()
+    claimed_lock = asyncio.Lock()
     written = len(existing_items)
 
     def limit_reached() -> bool:
         return limit is not None and written >= limit
 
     async with _make_fetcher(spider, settings) as fetcher:
+        # Share HTML for identical URLs within a run — one network hit per page even
+        # if two items/list chains request it. Failed fetches are evicted so a later
+        # caller can retry rather than reusing the exception forever.
+        fetch_cache: dict[str, asyncio.Task[str]] = {}
+        fetch_cache_lock = asyncio.Lock()
+
+        async def fetch_cached(url: str) -> str:
+            async with fetch_cache_lock:
+                task = fetch_cache.get(url)
+                if task is None:
+                    task = asyncio.create_task(fetcher.fetch(url))
+                    fetch_cache[url] = task
+            try:
+                return await task
+            except Exception:
+                async with fetch_cache_lock:
+                    if fetch_cache.get(url) is task:
+                        del fetch_cache[url]
+                raise
+
         file_mode = "a" if resume and existing_items else "w"
         f = output_path.open(file_mode, encoding="utf-8")
         try:
@@ -132,9 +156,14 @@ async def run(
                     return
                 item_id = item.get("id")
                 if item_id is not None:
-                    existing = existing_items.get(str(item_id))
+                    item_key = str(item_id)
+                    existing = existing_items.get(item_key)
                     if existing is not None and spider.should_skip_resume(existing):
                         return
+                    async with claimed_lock:
+                        if item_key in claimed_ids:
+                            return
+                        claimed_ids.add(item_key)
                 profile_url = item.get("profile_url")
                 if spider.fetch_profile and profile_url:
                     async with semaphore:
@@ -142,7 +171,7 @@ async def run(
                             return
                         logger.info("Fetching profile %s", profile_url)
                         try:
-                            html = await fetcher.fetch(profile_url)
+                            html = await fetch_cached(profile_url)
                         except Exception:
                             logger.exception(
                                 "Giving up on profile %s after retries; skipping", profile_url
@@ -160,7 +189,7 @@ async def run(
                             return
                         logger.info("Fetching %s", url)
                         try:
-                            html = await fetcher.fetch(url)
+                            html = await fetch_cached(url)
                         except Exception:
                             logger.exception(
                                 "Giving up on list page %s after retries; skipping", url

@@ -19,13 +19,13 @@ def test_parse_event_date() -> None:
 
 
 def test_should_skip_resume_refreshes_incomplete_old_events() -> None:
-    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=1))
     existing = {"id": "1", "date": "01.01.2020", "matches": []}
     assert spider.should_skip_resume(existing) is False
 
 
 def test_should_skip_resume_keeps_complete_old_events() -> None:
-    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=1))
     existing = {
         "id": "1",
         "date": "01.01.2020",
@@ -35,8 +35,8 @@ def test_should_skip_resume_keeps_complete_old_events() -> None:
 
 
 def test_should_skip_resume_refreshes_recent_events_even_with_results() -> None:
-    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
-    recent = datetime.now(timezone.utc).date() - timedelta(days=3)
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=1))
+    recent = datetime.now(timezone.utc).date()
     existing = {
         "id": "1",
         "date": recent.strftime("%d.%m.%Y"),
@@ -45,8 +45,19 @@ def test_should_skip_resume_refreshes_recent_events_even_with_results() -> None:
     assert spider.should_skip_resume(existing) is False
 
 
+def test_should_skip_resume_skips_complete_events_outside_refresh_window() -> None:
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=1))
+    older = datetime.now(timezone.utc).date() - timedelta(days=3)
+    existing = {
+        "id": "1",
+        "date": older.strftime("%d.%m.%Y"),
+        "matches": [{"match_index": 1, "result": "decisive"}],
+    }
+    assert spider.should_skip_resume(existing) is True
+
+
 def test_should_skip_resume_refreshes_future_announced_cards() -> None:
-    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=1))
     future = datetime.now(timezone.utc).date() + timedelta(days=5)
     existing = {"id": "1", "date": future.strftime("%d.%m.%Y"), "matches": []}
     assert spider.should_skip_resume(existing) is False
