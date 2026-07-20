@@ -117,7 +117,10 @@ User-Agent**. Spiders pick a transport via `fetch_backend`:
   notes, and `winners`/`losers` (or `sides` for a non-decisive result) — each side listing
   its wrestlers, any named team/stable, valets (accompanying but not competing), and
   whether it was the side defending a title coming in.
-- `titles` — stub; raises `NotImplementedError` naming its planned target URL.
+- `titles` — walks each promotion's Titles tab and fetches each title's profile for
+  full reign history (`reigns`, current champions, since date, rating). Under
+  `--resume`, active titles are re-fetched nightly so new reigns land; inactive
+  titles stay skipped.
 
 ## Exporting to a relational warehouse
 
