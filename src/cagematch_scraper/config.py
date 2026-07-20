@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     #: Earliest year (inclusive) the matches spider fetches events for.
     matches_since_year: int = 2020
 
+    #: Under `--resume`, re-fetch events whose date is within this many days of today
+    #: (including future dates) even if they already have match results. Older events
+    #: with an empty/missing card are also refreshed so a pre-air scrape gets results
+    #: on a later nightly run. Set to 0 to only refresh incomplete older events.
+    matches_refresh_days: int = 14
+
     #: Comma-separated The Smackdown Hotel promotion slugs the SDH spiders restrict to.
     #: Titles are discovered from each slug's `/title-history/<slug>/` index and
     #: wrestlers from its `/roster/<slug>/` page (both server-rendered). Default:

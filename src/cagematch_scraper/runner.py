@@ -44,26 +44,28 @@ def _make_fetcher(spider: BaseSpider, settings: Settings) -> Fetcher:
     return HybridFetcher(settings)
 
 
-def _load_existing_ids(output_path: Path) -> set[str]:
-    """Read `output_path`'s existing JSONL and return the ids already present.
+def _load_existing_items(output_path: Path) -> dict[str, dict]:
+    """Read `output_path`'s existing JSONL and return the newest item per id.
 
     Any line that fails to parse (e.g. the process was killed mid-write, truncating
     the last line) is dropped and the file rewritten without it, so a resumed run
-    doesn't leave a corrupt line behind.
+    doesn't leave a corrupt line behind. When the same id appears more than once,
+    the last valid line wins — matching how export dedupes before loading.
     """
     if not output_path.exists():
-        return set()
+        return {}
 
     raw_lines = [line for line in output_path.read_text(encoding="utf-8").splitlines() if line]
     valid_lines: list[str] = []
-    ids: set[str] = set()
+    items: dict[str, dict] = {}
     for line in raw_lines:
         try:
-            item_id = json.loads(line)["id"]
-        except (json.JSONDecodeError, KeyError):
+            item = json.loads(line)
+            item_id = item["id"]
+        except (json.JSONDecodeError, KeyError, TypeError):
             continue
         valid_lines.append(line)
-        ids.add(item_id)
+        items[str(item_id)] = item
 
     if len(valid_lines) != len(raw_lines):
         dropped = len(raw_lines) - len(valid_lines)
@@ -72,7 +74,12 @@ def _load_existing_ids(output_path: Path) -> set[str]:
         )
         logger.warning("Dropped %d corrupt line(s) from %s while resuming", dropped, output_path)
 
-    return ids
+    return items
+
+
+def _load_existing_ids(output_path: Path) -> set[str]:
+    """Ids already present in `output_path` (newest line per id)."""
+    return set(_load_existing_items(output_path))
 
 
 async def run(
@@ -82,30 +89,33 @@ async def run(
     results to JSONL.
 
     With `resume=True`, items already present in the output file (matched by `id`) are
-    neither re-fetched nor re-written — useful for picking a long run back up after an
-    interruption. Without it, the output file is overwritten from scratch as before.
+    skipped when `spider.should_skip_resume(existing)` returns True — the default, used
+    to pick a long run back up after an interruption. Spiders may refresh selected
+    existing rows (e.g. events scraped before results posted); refreshed items are
+    appended so export can pick up the newest line per id. Without `--resume`, the
+    output file is overwritten from scratch as before.
 
     Returns the number of items written (including, when resuming, those already
-    present). With `limit` set and concurrency > 1, the final count may slightly exceed
-    `limit`: work already in flight when the limit is reached isn't cancelled, only
-    further work is skipped.
+    present that were skipped). With `limit` set and concurrency > 1, the final count
+    may slightly exceed `limit`: work already in flight when the limit is reached isn't
+    cancelled, only further work is skipped.
     """
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     output_path = settings.output_dir / f"{spider.name}.jsonl"
 
-    already_done: set[str] = _load_existing_ids(output_path) if resume else set()
-    if already_done:
-        logger.info("Resuming %s: %d items already present", output_path, len(already_done))
+    existing_items: dict[str, dict] = _load_existing_items(output_path) if resume else {}
+    if existing_items:
+        logger.info("Resuming %s: %d items already present", output_path, len(existing_items))
 
     semaphore = asyncio.Semaphore(settings.concurrency)
     write_lock = asyncio.Lock()
-    written = len(already_done)
+    written = len(existing_items)
 
     def limit_reached() -> bool:
         return limit is not None and written >= limit
 
     async with _make_fetcher(spider, settings) as fetcher:
-        file_mode = "a" if resume and already_done else "w"
+        file_mode = "a" if resume and existing_items else "w"
         f = output_path.open(file_mode, encoding="utf-8")
         try:
 
@@ -121,8 +131,10 @@ async def run(
                 if limit_reached():
                     return
                 item_id = item.get("id")
-                if item_id is not None and item_id in already_done:
-                    return
+                if item_id is not None:
+                    existing = existing_items.get(str(item_id))
+                    if existing is not None and spider.should_skip_resume(existing):
+                        return
                 profile_url = item.get("profile_url")
                 if spider.fetch_profile and profile_url:
                     async with semaphore:

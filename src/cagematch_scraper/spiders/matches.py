@@ -30,13 +30,18 @@ to write and avoids repeating event fields on every match.
 
 Restricted by `Settings.promotion_ids` (default: WWE + AEW) — like the wrestlers
 spider, this one requires at least one promotion id, since that's how it finds events.
+
+Under `--resume`, announced cards scraped before results post are re-fetched: events
+with an empty/missing `matches` list, and any event dated within
+`Settings.matches_refresh_days` of today (including future dates), get a fresh profile
+fetch appended to the JSONL. Older events that already have results stay skipped.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from parsel import Selector
 
@@ -50,6 +55,26 @@ PAGE_SIZE = 100
 EVENTS_URL = "https://www.cagematch.net/?id=8&nr={promotion_id}&page=4&vYear={year}&s=0"
 EVENT_URL = "https://www.cagematch.net/?id=1&nr={event_id}"
 EVENT_LINK_RE = re.compile(r"^\?id=1&nr=(\d+)$")
+EVENT_DATE_RE = re.compile(r"^(\d{2})\.(\d{2})\.(\d{4})$")
+
+
+def _parse_event_date(value: object) -> date | None:
+    """Parse cagematch list-page dates (`DD.MM.YYYY`)."""
+    if not isinstance(value, str):
+        return None
+    match = EVENT_DATE_RE.match(value.strip())
+    if match is None:
+        return None
+    day, month, year = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _has_match_results(existing: dict) -> bool:
+    matches = existing.get("matches")
+    return isinstance(matches, list) and len(matches) > 0
 
 TITLE_LINK_RE = re.compile(r'<a href="\?id=5&amp;nr=(\d+)[^"]*">(.*?)</a>')
 VALET_RE = re.compile(r"\(w/(.*?)\)")
@@ -206,7 +231,25 @@ class MatchesSpider(BaseSpider):
         self.promotion_ids = promotion_ids
         current_year = datetime.now(timezone.utc).year
         self.years = list(range(settings.matches_since_year, current_year + 1))
+        self.refresh_days = settings.matches_refresh_days
         self._seen: set[str] = set()
+
+    def should_skip_resume(self, existing: dict) -> bool:
+        """Skip only older events that already have results.
+
+        Announced cards scraped before an event airs typically have `matches: []`.
+        Nightly `--resume` must re-fetch those (and recent events, whose cards/ratings
+        still change) so results land after the fact. Older complete events stay skipped.
+        """
+        event_date = _parse_event_date(existing.get("date"))
+        if event_date is None:
+            return _has_match_results(existing)
+
+        today = datetime.now(timezone.utc).date()
+        age_days = (today - event_date).days
+        if age_days <= self.refresh_days:
+            return False
+        return _has_match_results(existing)
 
     def start_requests(self) -> Iterable[str]:
         for promotion_id in self.promotion_ids:

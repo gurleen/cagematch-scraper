@@ -66,6 +66,8 @@ jobs:
 
       # Nightly only needs new/updated events. Historical years (default since 2020)
       # are a one-shot backfill — `--resume` still walks every year list page otherwise.
+      # Matches `--resume` re-fetches incomplete/recent events so a pre-air scrape gets
+      # results on a later run (see Settings.matches_refresh_days).
       - name: Scrape matches
         run: |
           export CAGEMATCH_MATCHES_SINCE_YEAR="$(date -u +%Y)"

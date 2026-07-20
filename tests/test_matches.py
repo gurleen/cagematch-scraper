@@ -1,13 +1,55 @@
+from datetime import date, datetime, timedelta, timezone
+
 import pytest
 from parsel import Selector
 
 from cagematch_scraper.config import Settings
-from cagematch_scraper.spiders.matches import MatchesSpider
+from cagematch_scraper.spiders.matches import MatchesSpider, _parse_event_date
 
 
 def test_requires_promotion_ids() -> None:
     with pytest.raises(ValueError):
         MatchesSpider(Settings(promotion_ids=""))
+
+
+def test_parse_event_date() -> None:
+    assert _parse_event_date("26.03.2020") == date(2020, 3, 26)
+    assert _parse_event_date("not-a-date") is None
+    assert _parse_event_date(None) is None
+
+
+def test_should_skip_resume_refreshes_incomplete_old_events() -> None:
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
+    existing = {"id": "1", "date": "01.01.2020", "matches": []}
+    assert spider.should_skip_resume(existing) is False
+
+
+def test_should_skip_resume_keeps_complete_old_events() -> None:
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
+    existing = {
+        "id": "1",
+        "date": "01.01.2020",
+        "matches": [{"match_index": 1, "result": "decisive"}],
+    }
+    assert spider.should_skip_resume(existing) is True
+
+
+def test_should_skip_resume_refreshes_recent_events_even_with_results() -> None:
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
+    recent = datetime.now(timezone.utc).date() - timedelta(days=3)
+    existing = {
+        "id": "1",
+        "date": recent.strftime("%d.%m.%Y"),
+        "matches": [{"match_index": 1, "result": "decisive"}],
+    }
+    assert spider.should_skip_resume(existing) is False
+
+
+def test_should_skip_resume_refreshes_future_announced_cards() -> None:
+    spider = MatchesSpider(Settings(promotion_ids="1", matches_refresh_days=14))
+    future = datetime.now(timezone.utc).date() + timedelta(days=5)
+    existing = {"id": "1", "date": future.strftime("%d.%m.%Y"), "matches": []}
+    assert spider.should_skip_resume(existing) is False
 
 
 def test_start_requests_one_per_promotion_per_year() -> None:
