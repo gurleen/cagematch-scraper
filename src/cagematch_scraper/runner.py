@@ -83,7 +83,11 @@ def _load_existing_ids(output_path: Path) -> set[str]:
 
 
 async def run(
-    spider: BaseSpider, settings: Settings, limit: int | None = None, resume: bool = False
+    spider: BaseSpider,
+    settings: Settings,
+    limit: int | None = None,
+    resume: bool = False,
+    refresh: bool = False,
 ) -> int:
     """Fetch every start URL for `spider` (and its pagination), parse it, and append
     results to JSONL.
@@ -92,14 +96,20 @@ async def run(
     skipped when `spider.should_skip_resume(existing, item)` returns True — the default,
     used to pick a long run back up after an interruption. Spiders may refresh selected
     existing rows (e.g. events scraped before results posted, active title reigns);
-    refreshed items are appended so export can pick up the newest line per id. Without
-    `--resume`, the output file is overwritten from scratch as before.
+    refreshed items are appended so export can pick up the newest line per id.
+
+    With `refresh=True`, the output file is appended to and existing ids are always
+    re-fetched (warehouse load keeps each id's newest line). Mutually exclusive with
+    `resume`. Without either flag, the output file is overwritten from scratch.
 
     Returns the number of items written (including, when resuming, those already
     present that were skipped). With `limit` set and concurrency > 1, the final count
     may slightly exceed `limit`: work already in flight when the limit is reached isn't
     cancelled, only further work is skipped.
     """
+    if resume and refresh:
+        raise ValueError("resume and refresh are mutually exclusive")
+
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     output_path = settings.output_dir / f"{spider.name}.jsonl"
 
@@ -139,7 +149,12 @@ async def run(
                         del fetch_cache[url]
                 raise
 
-        file_mode = "a" if resume and existing_items else "w"
+        if refresh and output_path.exists():
+            file_mode = "a"
+        elif resume and existing_items:
+            file_mode = "a"
+        else:
+            file_mode = "w"
         f = output_path.open(file_mode, encoding="utf-8")
         try:
 

@@ -39,17 +39,21 @@ even when they already have results. Events more than
 PPV/PLE — far-out TV/house shows are skipped until they get closer. Older complete
 events stay skipped. Each event's results page is fetched once; every bout on the
 card is parsed from that single page.
+
+Pass `on_dates` (calendar dates) to scrape only those days via Cagematch's
+`vYear`/`vMonth`/`vDay` listing filter — used by the hourly upcoming-events refresh.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timezone
 
 from parsel import Selector
 
 from ..config import Settings
+from ..dates import cagematch_date_text
 from ..items import MatchItem, MatchParticipant, MatchRecord, MatchSide
 from .base import BaseSpider
 from .htmlutils import LINK_RE, TEAM_SECTIONS, br_list, info_boxes, strip_tags, text_of
@@ -57,6 +61,10 @@ from .promotions import _parse_rating, _parse_votes
 
 PAGE_SIZE = 100
 EVENTS_URL = "https://www.cagematch.net/?id=8&nr={promotion_id}&page=4&vYear={year}&s=0"
+EVENTS_BY_DATE_URL = (
+    "https://www.cagematch.net/?id=8&nr={promotion_id}"
+    "&page=4&vYear={year}&vMonth={month}&vDay={day}&s=0"
+)
 EVENT_URL = "https://www.cagematch.net/?id=1&nr={event_id}"
 EVENT_LINK_RE = re.compile(r"^\?id=1&nr=(\d+)$")
 EVENT_DATE_RE = re.compile(r"^(\d{2})\.(\d{2})\.(\d{4})$")
@@ -235,7 +243,7 @@ class MatchesSpider(BaseSpider):
     name = "matches"
     fetch_profile = True
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, on_dates: Sequence[date] | None = None):
         promotion_ids = settings.promotion_id_list()
         if not promotion_ids:
             raise ValueError(
@@ -243,8 +251,15 @@ class MatchesSpider(BaseSpider):
                 "(set CAGEMATCH_PROMOTION_IDS)"
             )
         self.promotion_ids = promotion_ids
+        self.on_dates = list(on_dates) if on_dates else None
+        self._on_date_texts = (
+            {cagematch_date_text(d) for d in self.on_dates} if self.on_dates else None
+        )
         current_year = datetime.now(timezone.utc).year
-        self.years = list(range(settings.matches_since_year, current_year + 1))
+        if self.on_dates:
+            self.years = sorted({d.year for d in self.on_dates})
+        else:
+            self.years = list(range(settings.matches_since_year, current_year + 1))
         self.refresh_days = settings.matches_refresh_days
         self.far_future_days = settings.matches_far_future_days
         self._seen: set[str] = set()
@@ -273,6 +288,16 @@ class MatchesSpider(BaseSpider):
         return _has_match_results(existing)
 
     def start_requests(self) -> Iterable[str]:
+        if self.on_dates:
+            for promotion_id in self.promotion_ids:
+                for day in self.on_dates:
+                    yield EVENTS_BY_DATE_URL.format(
+                        promotion_id=promotion_id,
+                        year=day.year,
+                        month=f"{day.month:02d}",
+                        day=f"{day.day:02d}",
+                    )
+            return
         for promotion_id in self.promotion_ids:
             for year in self.years:
                 yield EVENTS_URL.format(promotion_id=promotion_id, year=year)
@@ -305,9 +330,13 @@ class MatchesSpider(BaseSpider):
             name = "".join(event_link.css("::text").getall()).strip()
             if not name:
                 continue
-            self._seen.add(event_id)
 
             cells = [" ".join(c.css("::text").getall()).strip() for c in row.css("td")]
+            event_date = cells[1] if len(cells) > 1 else None
+            if self._on_date_texts and event_date not in self._on_date_texts:
+                continue
+
+            self._seen.add(event_id)
 
             item: MatchItem = {
                 "id": event_id,
@@ -315,8 +344,8 @@ class MatchesSpider(BaseSpider):
                 "profile_url": EVENT_URL.format(event_id=event_id),
                 "promotion": promotion_id,
             }
-            if len(cells) > 1:
-                item["date"] = cells[1]
+            if event_date is not None:
+                item["date"] = event_date
             if len(cells) > 4:
                 item["location"] = cells[4]
             if len(cells) >= 2:

@@ -9,11 +9,13 @@ import duckdb
 import typer
 
 from .config import Settings
+from .dates import resolve_on_dates
 from .export import changes as export_changes
 from .export import cursor as export_cursor
 from .export import warehouse
 from .runner import run
 from .spiders import SPIDERS
+from .spiders.matches import MatchesSpider
 
 app = typer.Typer(help="cagematch.net scraper")
 export_app = typer.Typer(help="Convert scraped JSONL into flat parquet tables")
@@ -42,24 +44,55 @@ def scrape(
         "present unless the spider opts to refresh them (matches re-fetches incomplete "
         "or recent events so nightly picks up post-air results)",
     ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Re-fetch items and append to data/<spider>.jsonl (keeps prior lines; warehouse "
+        "load retains each id's newest snapshot). Mutually exclusive with --resume.",
+    ),
+    on_dates: str | None = typer.Option(
+        None,
+        "--on-dates",
+        help="Matches spider only: comma-separated dates to scrape "
+        "(today, tomorrow, YYYY-MM-DD, or DD.MM.YYYY). Uses Cagematch's day filter "
+        "and America/New_York for relative tokens.",
+    ),
 ) -> None:
     """Run a spider and write its output to data/<spider>.jsonl."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    if resume and refresh:
+        typer.echo("--resume and --refresh are mutually exclusive.", err=True)
+        raise typer.Exit(1)
 
     spider_cls = SPIDERS.get(spider_name)
     if spider_cls is None:
         typer.echo(f"Unknown spider: {spider_name!r}. Run 'cagematch list-spiders'.", err=True)
         raise typer.Exit(1)
 
+    if on_dates is not None and spider_name != MatchesSpider.name:
+        typer.echo("--on-dates is only supported for the matches spider.", err=True)
+        raise typer.Exit(1)
+
     settings = Settings()
     if headful:
         settings.headless = False
 
-    spider = spider_cls(settings)
+    if on_dates is not None:
+        try:
+            dates = resolve_on_dates(on_dates)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+        spider = MatchesSpider(settings, on_dates=dates)
+    else:
+        spider = spider_cls(settings)
     if no_profiles:
         spider.fetch_profile = False
 
-    written = asyncio.run(run(spider, settings, limit=limit, resume=resume))
+    written = asyncio.run(
+        run(spider, settings, limit=limit, resume=resume, refresh=refresh)
+    )
     typer.echo(f"Wrote {written} items to {settings.output_dir / f'{spider_name}.jsonl'}")
 
 

@@ -1,0 +1,59 @@
+name: Refresh upcoming events
+
+# Re-scrape Cagematch events for today + tomorrow (America/New_York), then
+# incrementally export and sync to Supabase. Complements nightly.yml so live
+# cards/results land in Ringside within about an hour.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same data/ cache as nightly.yml so incremental jsonl + warehouse stay shared.
+      - name: Restore data/ cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/
+          key: cagematch-data-${{ github.run_id }}
+          restore-keys: |
+            cagematch-data-
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.17"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install patchright browser
+        run: uv run patchright install chromium --with-deps
+
+      - name: Refresh today + tomorrow events
+        run: uv run cagematch scrape matches --on-dates today,tomorrow --refresh
+        env:
+          CAGEMATCH_HEADLESS: "true"
+          # CAGEMATCH_PROXY_SERVER: ${{ secrets.CAGEMATCH_PROXY_SERVER }}
+          # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
+          # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
+
+      - name: Flatten into the warehouse
+        run: uv run cagematch export nightly
+
+      - name: Sync to Supabase
+        run: uv run cagematch export sync-postgres
+        env:
+          CAGEMATCH_POSTGRES_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Save data/ cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: cagematch-data-${{ github.run_id }}

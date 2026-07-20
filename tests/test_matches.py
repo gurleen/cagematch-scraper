@@ -110,6 +110,35 @@ def test_start_requests_one_per_promotion_per_year() -> None:
     assert min(spider.years) == 2023
 
 
+def test_start_requests_on_dates_uses_day_filter() -> None:
+    from datetime import date
+
+    spider = MatchesSpider(
+        Settings(promotion_ids="1,2287"),
+        on_dates=[date(2026, 7, 20), date(2026, 7, 21)],
+    )
+    urls = list(spider.start_requests())
+
+    assert len(urls) == 4
+    assert all("vMonth=07" in u for u in urls)
+    assert {u.split("vDay=")[1].split("&")[0] for u in urls} == {"20", "21"}
+    assert {u.split("nr=")[1].split("&")[0] for u in urls} == {"1", "2287"}
+
+
+def test_parse_events_list_filters_on_dates(wwe_events_2020_html: str) -> None:
+    from datetime import date
+
+    spider = MatchesSpider(Settings(promotion_ids="1"), on_dates=[date(2020, 12, 28)])
+    selector = Selector(text=wwe_events_2020_html)
+
+    items = list(
+        spider.parse(selector, "https://www.cagematch.net/?id=8&nr=1&page=4&vYear=2020&s=0")
+    )
+
+    assert {item["date"] for item in items} == {"28.12.2020"}
+    assert {item["id"] for item in items} == {"297119", "297122"}
+
+
 def test_parse_events_list(wwe_events_2020_html: str) -> None:
     spider = MatchesSpider(Settings(promotion_ids="1"))
     selector = Selector(text=wwe_events_2020_html)

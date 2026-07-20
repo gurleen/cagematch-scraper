@@ -107,6 +107,11 @@ User-Agent**. Spiders pick a transport via `fetch_backend`:
   output line is one **event**, with all of its matches nested under `matches` (not one
   line per match — event fields like date/location aren't repeated per match).
 
+  Pass `--on-dates today,tomorrow` (or ISO / `DD.MM.YYYY` dates) to hit Cagematch's
+  day filter instead of walking every year — pair with `--refresh` to append
+  re-fetched cards without wiping `data/matches.jsonl`. Relative tokens use
+  America/New_York.
+
   Event-level fields: name, date, location, rating/votes (from the listing), plus
   `event_type` (e.g. "TV-Show", "Premium Live Event"), `arena`, `broadcast_type`
   ("Live"/"Taped"), `broadcast_date`, `tv_network`, and `commentators` — pulled from the
@@ -182,6 +187,12 @@ sync-postgres`. `data/` (jsonl history, warehouse, cursor) persists across runs 
 a `SUPABASE_DB_URL` repository secret (the Postgres connection string — session pooler,
 see above) and, if you're scraping through a proxy, the commented-out
 `CAGEMATCH_PROXY_*` secrets in the workflow filled in.
+
+`.github/workflows/refresh-upcoming.yml` runs hourly (and on-demand): re-scrapes
+`matches` for events dated **today or tomorrow** (`America/New_York`) via
+`--on-dates today,tomorrow --refresh`, then the same export + Postgres sync. Uses the
+same `data/` cache as nightly so refreshed cards/results land in Supabase within about
+an hour of airing.
 
 `.github/workflows/scrape.yml.example` is an older, non-active template (rename to
 `.yml` to enable) showing just the scrape step in isolation with proxy env vars wired to
