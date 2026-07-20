@@ -49,10 +49,14 @@ class BaseSpider(ABC):
         """
         return None
 
-    def should_skip_resume(self, existing: dict) -> bool:
+    def should_skip_resume(self, existing: dict, item: dict | None = None) -> bool:
         """Return True if an already-scraped item should not be re-fetched under
         `--resume`. Default keeps the original interrupt-recovery behavior: skip every
         id already present in the JSONL. Spiders that need to refresh stale rows
-        (e.g. events scraped before results posted) override this.
+        (e.g. events scraped before results posted, active titles with new reigns)
+        override this.
+
+        `item` is the freshly parsed list/detail stub when available; spiders may use
+        it (e.g. listing status) when the stored row alone is not enough.
         """
         return True

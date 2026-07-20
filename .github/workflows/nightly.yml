@@ -58,6 +58,8 @@ jobs:
           # CAGEMATCH_PROXY_USERNAME: ${{ secrets.CAGEMATCH_PROXY_USERNAME }}
           # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
 
+      # Titles `--resume` re-fetches active belts so new reigns (e.g. title changes on
+      # last night's TV) land; inactive titles stay skipped.
       - name: Scrape titles
         run: uv run cagematch scrape titles --resume
         env:
@@ -82,7 +84,8 @@ jobs:
           # CAGEMATCH_PROXY_PASSWORD: ${{ secrets.CAGEMATCH_PROXY_PASSWORD }}
 
       # SDH is plain HTTP (no Patchright / Sucuri). Run after Cagematch so a browser
-      # flake doesn't block the cheaper secondary source.
+      # flake doesn't block the cheaper secondary source. Titles `--resume` always
+      # rewrites reign history (detail pages are the start URLs).
       - name: Scrape SDH titles
         run: uv run cagematch scrape sdh_titles --resume
 

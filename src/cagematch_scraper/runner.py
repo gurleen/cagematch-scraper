@@ -89,11 +89,11 @@ async def run(
     results to JSONL.
 
     With `resume=True`, items already present in the output file (matched by `id`) are
-    skipped when `spider.should_skip_resume(existing)` returns True — the default, used
-    to pick a long run back up after an interruption. Spiders may refresh selected
-    existing rows (e.g. events scraped before results posted); refreshed items are
-    appended so export can pick up the newest line per id. Without `--resume`, the
-    output file is overwritten from scratch as before.
+    skipped when `spider.should_skip_resume(existing, item)` returns True — the default,
+    used to pick a long run back up after an interruption. Spiders may refresh selected
+    existing rows (e.g. events scraped before results posted, active title reigns);
+    refreshed items are appended so export can pick up the newest line per id. Without
+    `--resume`, the output file is overwritten from scratch as before.
 
     Returns the number of items written (including, when resuming, those already
     present that were skipped). With `limit` set and concurrency > 1, the final count
@@ -158,7 +158,7 @@ async def run(
                 if item_id is not None:
                     item_key = str(item_id)
                     existing = existing_items.get(item_key)
-                    if existing is not None and spider.should_skip_resume(existing):
+                    if existing is not None and spider.should_skip_resume(existing, item):
                         return
                     async with claimed_lock:
                         if item_key in claimed_ids:

@@ -249,14 +249,15 @@ class MatchesSpider(BaseSpider):
         self.far_future_days = settings.matches_far_future_days
         self._seen: set[str] = set()
 
-    def should_skip_resume(self, existing: dict) -> bool:
+    def should_skip_resume(self, existing: dict, item: dict | None = None) -> bool:
         """Skip resume fetches that are unlikely to have new card/results data.
 
         Announced cards scraped before an event airs typically have `matches: []`.
         Nightly `--resume` re-fetches those once they are near-term (and recent events
         whose cards/ratings still change). Events more than `far_future_days` ahead
         only keep refreshing when they are a PPV/PLE — far-out TV/house shows wait.
-        Older complete events stay skipped.
+        Older complete events stay skipped. `item` is unused (list stubs lack the
+        stored `matches` / `event_type` fields this decision needs).
         """
         event_date = _parse_event_date(existing.get("date"))
         if event_date is None:

@@ -131,6 +131,20 @@ class TitlesSpider(BaseSpider):
         self.promotion_ids = promotion_ids
         self._seen: set[str] = set()
 
+    def should_skip_resume(self, existing: dict, item: dict | None = None) -> bool:
+        """Refresh active titles under `--resume` so new reigns land nightly.
+
+        Inactive belts almost never gain reigns; skipping them keeps resume cheap.
+        Prefer the listing page's `status` when present — the stored JSONL row can
+        lag a reactivation.
+        """
+        status = ""
+        if item is not None:
+            status = str(item.get("status") or "")
+        if not status:
+            status = str(existing.get("status") or "")
+        return status.strip().lower() == "inactive"
+
     def start_requests(self) -> Iterable[str]:
         for promotion_id in self.promotion_ids:
             yield TITLES_URL.format(promotion_id=promotion_id)

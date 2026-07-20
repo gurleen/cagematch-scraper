@@ -210,6 +210,14 @@ class SdhTitlesSpider(BaseSpider):
     def __init__(self, settings: Settings):
         self.settings = settings
 
+    def should_skip_resume(self, existing: dict, item: dict | None = None) -> bool:
+        """Always refresh under `--resume`.
+
+        Start URLs are title detail pages (reign history included), so `--resume`
+        already pays for the fetch — discarding the parse left reigns stale.
+        """
+        return False
+
     def start_requests(self) -> Iterable[str]:
         return discover_title_urls(self.settings.sdh_promotion_slug_list())
 
