@@ -108,7 +108,7 @@ class BrowserManager:
             await self._playwright.stop()
 
     async def _throttle(self) -> None:
-        """Space out request *start* times by at least `request_delay`.
+        """Space out request *start* times by a sampled delay from settings.
 
         Guarded by a lock so concurrent `fetch()` callers (see `runner.py`, which now
         runs fetches concurrently up to `settings.concurrency`) queue for their turn to
@@ -118,7 +118,7 @@ class BrowserManager:
         """
         async with self._throttle_lock:
             elapsed = time.monotonic() - self._last_request_at
-            remaining = self._settings.request_delay - elapsed
+            remaining = self._settings.next_request_delay() - elapsed
             if remaining > 0:
                 await asyncio.sleep(remaining)
             self._last_request_at = time.monotonic()
