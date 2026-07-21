@@ -239,6 +239,30 @@ class SdhWrestlerImageEntry(TypedDict, total=False):
     image_url: str
 
 
+class SdhWrestlerCareerAwardEntry(TypedDict, total=False):
+    name: str
+    url: str | None
+    image_url: str | None
+
+
+class SdhWrestlerHallOfFameEntry(TypedDict, total=False):
+    name: str
+    category: str | None  # e.g. "Individual"
+    year: int | None
+    url: str | None
+    image_url: str | None
+
+
+class SdhWrestlerTitleWinEntry(TypedDict, total=False):
+    promotion: str
+    title: str
+    times: int | None
+    details: str | None  # e.g. "(with Kofi Kingston)" or "(2008, 2009)"
+    title_url: str | None
+    image_url: str | None
+    source: str  # "auto" (titles-auto) | "manual" (indie titles list)
+
+
 class SdhWrestlerItem(TypedDict, total=False):
     id: str  # wrestler slug, e.g. "cm-punk"
     name: str
@@ -260,3 +284,7 @@ class SdhWrestlerItem(TypedDict, total=False):
     roles: list[SdhWrestlerRoleEntry]
     alignments: list[SdhWrestlerAlignmentEntry]
     images: list[SdhWrestlerImageEntry]
+    career_awards: list[SdhWrestlerCareerAwardEntry]
+    hall_of_fames: list[SdhWrestlerHallOfFameEntry]
+    title_wins: list[SdhWrestlerTitleWinEntry]
+    accomplishments: list[str]

@@ -56,6 +56,10 @@ TABLES = [
     "sdh_wrestler_roles",
     "sdh_wrestler_alignments",
     "sdh_wrestler_images",
+    "sdh_wrestler_career_awards",
+    "sdh_wrestler_hall_of_fames",
+    "sdh_wrestler_title_wins",
+    "sdh_wrestler_accomplishments",
     "wrestler_crosswalk",
     "title_crosswalk",
 ]
@@ -128,6 +132,10 @@ _SOURCE_SYNC_SPECS: dict[str, list[tuple[str, str]]] = {
         ("sdh_wrestler_roles", "wrestler_id IN ({ids})"),
         ("sdh_wrestler_alignments", "wrestler_id IN ({ids})"),
         ("sdh_wrestler_images", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_career_awards", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_hall_of_fames", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_title_wins", "wrestler_id IN ({ids})"),
+        ("sdh_wrestler_accomplishments", "wrestler_id IN ({ids})"),
     ],
 }
 

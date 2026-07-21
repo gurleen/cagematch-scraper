@@ -448,7 +448,11 @@ SELECT * FROM read_ndjson('{path}', columns = {
     promotions: 'STRUCT(promotion VARCHAR, brand VARCHAR, from_date VARCHAR, to_date VARCHAR)[]',
     roles: 'STRUCT(role VARCHAR, from_date VARCHAR, to_date VARCHAR)[]',
     alignments: 'STRUCT(alignment VARCHAR, details VARCHAR, from_date VARCHAR, to_date VARCHAR)[]',
-    images: 'STRUCT(label VARCHAR, image_url VARCHAR)[]'
+    images: 'STRUCT(label VARCHAR, image_url VARCHAR)[]',
+    career_awards: 'STRUCT(name VARCHAR, url VARCHAR, image_url VARCHAR)[]',
+    hall_of_fames: 'STRUCT(name VARCHAR, category VARCHAR, year INTEGER, url VARCHAR, image_url VARCHAR)[]',
+    title_wins: 'STRUCT(promotion VARCHAR, title VARCHAR, times INTEGER, details VARCHAR, title_url VARCHAR, image_url VARCHAR, source VARCHAR)[]',
+    accomplishments: 'VARCHAR[]'
 });
 
 INSERT INTO sdh_wrestlers
@@ -508,3 +512,30 @@ INSERT INTO sdh_wrestler_images (wrestler_id, seq, label, image_url)
 SELECT w.id, t.seq - 1, t.entry.label, t.entry.image_url
 FROM raw_sdh_wrestlers w, UNNEST(w.images) WITH ORDINALITY AS t(entry, seq)
 WHERE w.images IS NOT NULL;
+
+DELETE FROM sdh_wrestler_career_awards WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_career_awards (wrestler_id, seq, name, url, image_url)
+SELECT w.id, t.seq - 1, t.entry.name, t.entry.url, t.entry.image_url
+FROM raw_sdh_wrestlers w, UNNEST(w.career_awards) WITH ORDINALITY AS t(entry, seq)
+WHERE w.career_awards IS NOT NULL;
+
+DELETE FROM sdh_wrestler_hall_of_fames WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_hall_of_fames (wrestler_id, seq, name, category, year, url, image_url)
+SELECT w.id, t.seq - 1, t.entry.name, t.entry.category, t.entry.year, t.entry.url, t.entry.image_url
+FROM raw_sdh_wrestlers w, UNNEST(w.hall_of_fames) WITH ORDINALITY AS t(entry, seq)
+WHERE w.hall_of_fames IS NOT NULL;
+
+DELETE FROM sdh_wrestler_title_wins WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_title_wins (
+    wrestler_id, seq, promotion, title, times, details, title_url, image_url, source
+)
+SELECT w.id, t.seq - 1, t.entry.promotion, t.entry.title, t.entry.times, t.entry.details,
+       t.entry.title_url, t.entry.image_url, t.entry.source
+FROM raw_sdh_wrestlers w, UNNEST(w.title_wins) WITH ORDINALITY AS t(entry, seq)
+WHERE w.title_wins IS NOT NULL;
+
+DELETE FROM sdh_wrestler_accomplishments WHERE wrestler_id IN (SELECT id FROM raw_sdh_wrestlers);
+INSERT INTO sdh_wrestler_accomplishments (wrestler_id, seq, value)
+SELECT w.id, t.seq - 1, t.val
+FROM raw_sdh_wrestlers w, UNNEST(w.accomplishments) WITH ORDINALITY AS t(val, seq)
+WHERE w.accomplishments IS NOT NULL;

@@ -91,6 +91,40 @@ def test_parse_cm_punk_wrestler() -> None:
     labels = [e["label"] for e in item["images"]]
     assert "Apr 2026" in labels
 
+    assert item["career_awards"]
+    award = item["career_awards"][0]
+    assert award["name"] == "WWE Triple Crown Champion"
+    assert award["url"] and "triple-crown" in award["url"]
+    assert award["image_url"] and award["image_url"].startswith("https://")
+
+    assert item["hall_of_fames"]
+    hof = item["hall_of_fames"][0]
+    assert hof["name"] == "ROH Hall of Fame"
+    assert hof["category"] == "Individual"
+    assert hof["year"] == 2022
+    assert hof["image_url"] and hof["image_url"].startswith("https://")
+
+    assert item["title_wins"]
+    undisputed = next(
+        t for t in item["title_wins"] if t["title"] == "Undisputed WWE Championship"
+    )
+    assert undisputed["promotion"] == "World Wrestling Entertainment"
+    assert undisputed["times"] == 3
+    assert undisputed["source"] == "auto"
+    assert undisputed["title_url"] and "wwe-championship" in undisputed["title_url"]
+    assert undisputed["image_url"] and undisputed["image_url"].startswith("https://")
+
+    indie = next(
+        t for t in item["title_wins"] if "IWA Mid-South Heavyweight" in t["title"]
+    )
+    assert indie["source"] == "manual"
+    assert indie["times"] == 5
+    assert indie["image_url"] is None
+
+    assert item["accomplishments"]
+    assert any("Slammy" in a for a in item["accomplishments"])
+    assert any("PWI Wrestler of the Year" in a for a in item["accomplishments"])
+
 
 def test_sdh_export_flatten(tmp_path: Path) -> None:
     import json
@@ -145,3 +179,23 @@ def test_sdh_export_flatten(tmp_path: Path) -> None:
         "SELECT image_url FROM sdh_wrestlers WHERE id = 'cm-punk'"
     ).fetchone()[0]
     assert wrestler_image and "full-body" in wrestler_image
+
+    assert con.execute("SELECT count(*) FROM sdh_wrestler_career_awards").fetchone()[0] >= 1
+    assert con.execute("SELECT count(*) FROM sdh_wrestler_hall_of_fames").fetchone()[0] >= 1
+    assert con.execute("SELECT count(*) FROM sdh_wrestler_title_wins").fetchone()[0] >= 1
+    assert (
+        con.execute("SELECT count(*) FROM sdh_wrestler_accomplishments").fetchone()[0]
+        >= 1
+    )
+    assert (
+        con.execute(
+            "SELECT count(*) FROM sdh_wrestler_career_awards WHERE image_url IS NOT NULL"
+        ).fetchone()[0]
+        >= 1
+    )
+    assert (
+        con.execute(
+            "SELECT count(*) FROM sdh_wrestler_title_wins WHERE image_url IS NOT NULL"
+        ).fetchone()[0]
+        >= 1
+    )
