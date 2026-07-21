@@ -142,79 +142,6 @@ _SOURCE_SYNC_SPECS: dict[str, list[tuple[str, str]]] = {
 _WRESTLER_CROSSWALK_SOURCES = {"wrestlers", "sdh_wrestlers"}
 _TITLE_CROSSWALK_SOURCES = {"titles", "sdh_titles"}
 
-# Out-of-band Postgres tables that FK into warehouse parents but are not managed in
-# the local DuckDB schema (e.g. operator-maintained Supabase helpers). Sync must
-# stash+clear them before deleting parents, then restore rows whose parents remain.
-# Tuple: (external_table, parent_table, fk_column).
-_POSTGRES_EXTERNAL_CHILDREN: list[tuple[str, str, str]] = [
-    ("promotion_abbr", "promotions", "promotion_id"),
-]
-
-
-def _postgres_relation_exists(con: duckdb.DuckDBPyConnection, table: str) -> bool:
-    """Return True when `pg.<table>` is queryable on the attached Postgres catalog."""
-    try:
-        con.execute(f'SELECT 1 FROM pg."{table}" LIMIT 0')
-    except Exception:
-        return False
-    return True
-
-
-def _stash_external_children(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    parent_table: str | None = None,
-    ids_sql: str | None = None,
-) -> list[tuple[str, str, str, str]]:
-    """Copy matching external FK-child rows into temp tables and delete them.
-
-    When `parent_table`/`ids_sql` are set, only that parent's changed ids are stashed
-    (incremental). When both are unset, every configured external child is stashed
-    (full sync). Returns `(stash_name, external_table, parent_table, fk_column)` tuples
-    for `_restore_external_children`.
-    """
-    stashes: list[tuple[str, str, str, str]] = []
-    for table, parent, fk_column in _POSTGRES_EXTERNAL_CHILDREN:
-        if parent_table is not None and parent != parent_table:
-            continue
-        if not _postgres_relation_exists(con, table):
-            continue
-        stash = f"_sync_stash_{table}"
-        where = f'WHERE "{fk_column}" IN ({ids_sql})' if ids_sql is not None else ""
-        con.execute(f'DROP TABLE IF EXISTS "{stash}"')
-        con.execute(f'CREATE TEMP TABLE "{stash}" AS SELECT * FROM pg."{table}" {where}')
-        con.execute(f'DELETE FROM pg."{table}" {where}')
-        stashes.append((stash, table, parent, fk_column))
-        logger.info(
-            "Stashed Postgres external child %s (%s rows)",
-            table,
-            con.execute(f'SELECT count(*) FROM "{stash}"').fetchone()[0],
-        )
-    return stashes
-
-
-def _restore_external_children(
-    con: duckdb.DuckDBPyConnection,
-    stashes: list[tuple[str, str, str, str]],
-) -> None:
-    """Re-insert stashed external rows for parents that still exist after sync."""
-    for stash, table, parent, fk_column in stashes:
-        if not _postgres_relation_exists(con, table):
-            continue
-        con.execute(
-            f'INSERT INTO pg."{table}" '
-            f'SELECT * FROM "{stash}" '
-            f'WHERE "{fk_column}" IN (SELECT id FROM pg."{parent}")'
-        )
-        logger.info(
-            "Restored Postgres external child %s (%s rows)",
-            table,
-            con.execute(
-                f'SELECT count(*) FROM "{stash}" '
-                f'WHERE "{fk_column}" IN (SELECT id FROM pg."{parent}")'
-            ).fetchone()[0],
-        )
-
 
 def _split_statements(sql: str) -> list[str]:
     """Split a SQL blob into individual statements on `;`, ignoring semicolons that
@@ -368,6 +295,31 @@ def _postgres_schema_statements() -> list[str]:
     return [re.sub(r"\s*DEFAULT nextval\('\w+'\)", "", s) for s in statements]
 
 
+def _ensure_postgres_extras(postgres_url: str) -> None:
+    """Idempotent Postgres-only fixes DuckDB's postgres attachment cannot push down."""
+    import psycopg
+
+    with psycopg.connect(postgres_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "ALTER TABLE promotion_abbr "
+                "DROP CONSTRAINT IF EXISTS promotion_abbr_promotion_id_fkey"
+            )
+        conn.commit()
+
+
+def _bootstrap_postgres_schema(
+    con: duckdb.DuckDBPyConnection, local_catalog: str, postgres_url: str
+) -> None:
+    try:
+        con.execute("USE pg")
+        for statement in _postgres_schema_statements():
+            con.execute(statement)
+    finally:
+        con.execute(f"USE {local_catalog}")
+    _ensure_postgres_extras(postgres_url)
+
+
 def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str, int]:
     """Mirror the local warehouse's current state into a Postgres database.
 
@@ -393,12 +345,7 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
     escaped_url = postgres_url.replace("'", "''")
     con.execute(f"ATTACH '{escaped_url}' AS pg (TYPE postgres)")
     try:
-        try:
-            con.execute("USE pg")
-            for statement in _postgres_schema_statements():
-                con.execute(statement)
-        finally:
-            con.execute(f"USE {local_catalog}")
+        _bootstrap_postgres_schema(con, local_catalog, postgres_url)
 
         # DuckDB rewrites `TRUNCATE` through a postgres attachment into a plain
         # `DELETE` (confirmed via its error output), which doesn't cascade the way a
@@ -408,7 +355,6 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
         # single DuckDB transaction (one attached DB) keeps the mirror atomic.
         con.execute("BEGIN TRANSACTION")
         try:
-            external_stashes = _stash_external_children(con)
             for table in reversed(TABLES):
                 con.execute(f"DELETE FROM pg.{table}")
             for table in TABLES:
@@ -421,7 +367,6 @@ def sync_postgres(con: duckdb.DuckDBPyConnection, postgres_url: str) -> dict[str
                 columns = [desc[0] for desc in con.execute(f"SELECT * FROM {table} LIMIT 0").description]
                 col_list = ", ".join(f'"{c}"' for c in columns)
                 con.execute(f"INSERT INTO pg.{table} ({col_list}) SELECT {col_list} FROM {table}")
-            _restore_external_children(con, external_stashes)
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")
@@ -464,6 +409,8 @@ def sync_postgres_incremental(
         synced: dict[str, int] = {}
         con.execute("BEGIN TRANSACTION")
         try:
+            _ensure_postgres_extras(postgres_url)
+
             # These reference entity roots, so remove them before deleting a changed
             # wrestler/title. They are rebuilt below from the current local result.
             if refresh_wrestler_crosswalk:
@@ -471,19 +418,12 @@ def sync_postgres_incremental(
             if refresh_title_crosswalk:
                 con.execute("DELETE FROM pg.title_crosswalk")
 
-            external_stashes: list[tuple[str, str, str, str]] = []
             for source in SOURCES:
                 ids = pending.get(source)
                 if not ids:
                     continue
                 ids_sql = _sql_ids(ids)
                 spec = _SOURCE_SYNC_SPECS[source]
-                parent_table = spec[0][0]
-                external_stashes.extend(
-                    _stash_external_children(
-                        con, parent_table=parent_table, ids_sql=ids_sql
-                    )
-                )
 
                 for table, filter_template in reversed(spec):
                     where = _filter_sql(filter_template, ids_sql, catalog="pg.")
@@ -521,7 +461,6 @@ def sync_postgres_incremental(
                 )
                 synced[table] = row_count
 
-            _restore_external_children(con, external_stashes)
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")

@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS promotion_name_history (
     PRIMARY KEY (promotion_id, seq)
 );
 
+-- Operator-maintained promotion abbreviations. Intentionally no FK to `promotions`:
+-- Postgres full sync replaces that table without stashing or wiping this helper.
+CREATE TABLE IF NOT EXISTS promotion_abbr (
+    promotion_id    VARCHAR PRIMARY KEY,
+    abbreviation    VARCHAR NOT NULL
+);
+
 -- ============================== WRESTLERS ==============================
 
 CREATE TABLE IF NOT EXISTS wrestlers (
